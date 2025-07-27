@@ -147,30 +147,81 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 📱 **Phone:** {user_info['phone']}
 🆔 **User ID:** {user_id}
 
-Please create an account for this user on novacapitalwealthpro.com and send them the login details.
-Use /approveuser {user_id} to approve this account."""
+Please create an account for this user on novacapitalwealthpro.com and send them the login details."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_user_{user_id}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
     try:
         await context.bot.send_message(
             chat_id=ADMIN_USER_ID,
             text=admin_message,
+            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
     except TelegramError as e:
         logger.error(f"Failed to send admin notification: {e}")
     
-    keyboard = [
-        [InlineKeyboardButton("✅ Proceed", callback_data='proceed_to_menu')],
-        [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
     await update.message.reply_text(
         f"Welcome, {user_info['name']}! Your registration is awaiting admin confirmation. You'll be notified once approved.",
-        reply_markup=reply_markup
+        reply_markup=create_cancel_keyboard()
     )
     
-    return MAIN_MENU
+    return ConversationHandler.END
+
+async def approve_user_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle admin user approval via button"""
+    query = update.callback_query
+    await query.answer()
+    
+    if update.effective_user.id != ADMIN_USER_ID:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Unauthorized access."
+        )
+        return ConversationHandler.END
+    
+    try:
+        user_id = int(query.data.split('_')[-1])
+        
+        if user_id not in user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ User not found."
+            )
+            return ConversationHandler.END
+        
+        user_info = user_data[user_id]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now visit our website and use all trading features.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id}: {e}")
+        
+        await query.edit_message_text(
+            f"{query.message.text}\n\n✅ **User Approved** for user {user_id}."
+        )
+        
+        return ConversationHandler.END
+        
+    except ValueError:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Invalid format."
+        )
+        return ConversationHandler.END
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Display the main menu"""
@@ -328,7 +379,7 @@ async def get_deposit_amount(update: Update, context: ContextTypes.DEFAULT_TYPE)
 ⚠️ **Security Warning:** Never share your payment details publicly. Only send to the address above."""
         
         await update.message.reply_text(message, reply_markup=reply_markup, parse_mode='Markdown')
-        return MAIN_MENU
+        return DEPOSIT_PROOF
         
     except ValueError:
         await update.message.reply_text(
@@ -357,7 +408,7 @@ async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         text=f"{crypto_name} Address:\n`{address}`",
         parse_mode='Markdown'
     )
-    return MAIN_MENU
+    return DEPOSIT_PROOF
 
 async def payment_made(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle payment confirmation"""
@@ -398,7 +449,7 @@ async def get_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 📱 **Phone:** {user_info['phone']}
 📧 **Email:** {user_info['email']}
 
-Click 'Approve' to confirm this deposit or use /approve {user_id} {amount:.2f}."""
+Click 'Approve' to confirm this deposit."""
     
     keyboard = [
         [InlineKeyboardButton("✅ Approve", callback_data=f'confirm_deposit_{user_id}_{amount}')]
@@ -469,7 +520,8 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
             )
         except TelegramError as e:
             logger.error(f"Failed to notify user {user_id}: {e}")
@@ -617,12 +669,18 @@ async def get_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
 📱 **Phone:** {user_info['phone']}
 📧 **Email:** {user_info['email']}
 
-Use /approvewithdrawal {user_id} {amount} to approve this withdrawal."""
+Click 'Approve' to confirm this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
     try:
         await context.bot.send_message(
             chat_id=ADMIN_USER_ID,
             text=admin_message,
+            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
     except TelegramError as e:
@@ -693,12 +751,18 @@ async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE)
 📱 **Phone:** {user_info['phone']}
 📧 **Email:** {user_info['email']}
 
-Use /approvewithdrawal {user_id} {amount} to approve this withdrawal."""
+Click 'Approve' to confirm this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
     try:
         await context.bot.send_message(
             chat_id=ADMIN_USER_ID,
             text=admin_message,
+            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
     except TelegramError as e:
@@ -716,6 +780,65 @@ Use /approvewithdrawal {user_id} {amount} to approve this withdrawal."""
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
     )
     return MAIN_MENU
+
+async def approve_withdrawal_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle admin's withdrawal approval via button"""
+    query = update.callback_query
+    await query.answer()
+    
+    if update.effective_user.id != ADMIN_USER_ID:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Unauthorized access."
+        )
+        return MAIN_MENU
+    
+    try:
+        _, user_id_str, amount_str = query.data.split('_')
+        user_id = int(user_id_str)
+        amount = float(amount_str)
+        
+        if user_id not in user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ User not found."
+            )
+            return MAIN_MENU
+        
+        user_info = get_user_data(user_id)
+        
+        if amount > user_info['balance']:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ Insufficient user balance."
+            )
+            return MAIN_MENU
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id}: {e}")
+        
+        await query.edit_message_text(
+            f"{query.message.text}\n\n✅ **Withdrawal Approved** for user {user_id}."
+        )
+        
+        return MAIN_MENU
+        
+    except ValueError:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Invalid format."
+        )
+        return MAIN_MENU
 
 async def show_copy_trade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Show copy trading options"""
@@ -913,34 +1036,7 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     query = update.callback_query
     await query.answer()
     
-    user_info = get_user_data(user_id)
-    
-    menu_text = f"""🎉 **Welcome, {user_info['name']}!** 🎉
-
-💰 **Available Balance:** ${user_info['balance']:.2f}
-📈 **Deposit:** ${user_info['deposit']:.2f}
-📊 **Profit:** ${user_info['profit']:.2f}
-📉 **Withdrawal:** ${user_info['withdrawal']:.2f}"""
-    
-    keyboard = [
-        [InlineKeyboardButton("💳 Deposit", callback_data='deposit'),
-         InlineKeyboardButton("💸 Withdraw", callback_data='withdraw')],
-        [InlineKeyboardButton("🤖 Copy Trade", callback_data='copy_trade'),
-         InlineKeyboardButton("🎯 Stake", callback_data='stake')],
-        [InlineKeyboardButton("🔄 Refresh Balance", callback_data='refresh_balance'),
-         InlineKeyboardButton("🌐 Visit Website", callback_data='visit_website')],
-        [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=menu_text,
-        reply_markup=reply_markup,
-        parse_mode='Markdown'
-    )
-    
-    return MAIN_MENU
+    return await show_main_menu(update, context)
 
 async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Get user's Telegram ID"""
@@ -1117,6 +1213,7 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and 
 - Approve a user's account to grant access to trading features.
 - Command: /approveuser <user_id>
 - Example: /approveuser 123456789
+- Alternatively, use the 'Approve' button in registration notifications.
 
 💳 **Approve Deposit**
 - Confirm a user's deposit to update their balance.
@@ -1128,6 +1225,7 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and 
 - Process a user's withdrawal request.
 - Command: /approvewithdrawal <user_id> <amount>
 - Example: /approvewithdrawal 123456789 500.25
+- Alternatively, use the 'Approve' button in withdrawal notifications.
 
 📈 **Update Profit**
 - Add profit to a user's account based on trading bot performance.
@@ -1180,7 +1278,8 @@ async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
             )
         except TelegramError as e:
             logger.error(f"Failed to notify user {user_id}: {e}")
@@ -1223,7 +1322,8 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
             )
         except TelegramError as e:
             logger.error(f"Failed to notify user {user_id}: {e}")
@@ -1260,7 +1360,8 @@ async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
             )
         except TelegramError as e:
             logger.error(f"Failed to notify user {user_id}: {e}")
@@ -1318,10 +1419,16 @@ async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         user_info = user_data[user_id]
         user_info['approved'] = True
         
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now visit our website and use all trading features."
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now visit our website and use all trading features.",
+                reply_markup=reply_markup
             )
         except TelegramError as e:
             logger.error(f"Failed to notify user {user_id}: {e}")
@@ -1394,6 +1501,7 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and 
 - Approve a user's account to grant access to trading features.
 - Command: /approveuser <user_id>
 - Example: /approveuser 123456789
+- Alternatively, use the 'Approve' button in registration notifications.
 
 💳 **Approve Deposit**
 - Confirm a user's deposit to update their balance.
@@ -1405,6 +1513,7 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and 
 - Process a user's withdrawal request.
 - Command: /approvewithdrawal <user_id> <amount>
 - Example: /approvewithdrawal 123456789 500.25
+- Alternatively, use the 'Approve' button in withdrawal notifications.
 
 📈 **Update Profit**
 - Add profit to a user's account based on trading bot performance.
@@ -1507,6 +1616,8 @@ def main() -> None:
                 CallbackQueryHandler(copy_address, pattern='^copy_address_'),
                 CallbackQueryHandler(payment_made, pattern='^payment_made$'),
                 CallbackQueryHandler(handle_deposit_confirmation, pattern='^confirm_deposit_'),
+                CallbackQueryHandler(approve_user_button, pattern='^approve_user_'),
+                CallbackQueryHandler(approve_withdrawal_button, pattern='^approve_withdrawal_'),
                 CallbackQueryHandler(handle_withdrawal, pattern='^withdraw$'),
                 CallbackQueryHandler(withdraw_crypto_amount, pattern='^withdraw_crypto$'),
                 CallbackQueryHandler(withdraw_bank_amount, pattern='^withdraw_bank$'),
