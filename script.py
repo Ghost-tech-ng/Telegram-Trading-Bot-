@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Bot configuration
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID'))
+ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID', 0))
 
 # In-memory storage
 user_data: Dict[int, Dict[str, Any]] = {}
@@ -92,7 +92,7 @@ async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get user's full name"""
     user_id = update.effective_user.id
     user_info = get_user_data(user_id)
-    user_info['name'] = update.message.text
+    user_info['name'] = update.message.text.strip()
     
     await update.message.reply_text(
         "Please enter your email address:",
@@ -104,7 +104,7 @@ async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get user's email"""
     user_id = update.effective_user.id
     user_info = get_user_data(user_id)
-    user_info['email'] = update.message.text
+    user_info['email'] = update.message.text.strip()
     
     await update.message.reply_text(
         "Please enter your phone number:",
@@ -116,9 +116,8 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get user's phone and complete registration"""
     user_id = update.effective_user.id
     user_info = get_user_data(user_id)
-    user_info['phone'] = update.message.text
+    user_info['phone'] = update.message.text.strip()
     
-    # Send registration details to admin
     admin_message = f"""📝 **New User Registration**
 
 👤 **Name:** {user_info['name']}
@@ -302,7 +301,6 @@ async def get_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     amount = context.user_data.get('deposit_amount', 0)
     crypto_name = context.user_data.get('selected_crypto', 'Unknown')
     
-    # Send proof to admin
     admin_message = f"""💳 **New Deposit Request**
 
 👤 **User:** {user_info['name']} (ID: {user_id})
@@ -320,7 +318,6 @@ Use /approve {user_id} {amount} to approve this deposit."""
             parse_mode='Markdown'
         )
         
-        # Forward the proof image to admin
         if update.message.photo:
             await context.bot.forward_message(
                 chat_id=ADMIN_USER_ID,
@@ -425,15 +422,13 @@ async def get_withdraw_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def get_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get crypto address for withdrawal"""
-    context.user_data['crypto_address'] = update.message.text
+    context.user_data['crypto_address'] = update.message.text.strip()
     
-    # Process crypto withdrawal
     user_id = update.effective_user.id
     user_info = get_user_data(user_id)
     amount = context.user_data['withdraw_amount']
     address = context.user_data['crypto_address']
     
-    # Send to admin for approval
     admin_message = f"""💸 **Crypto Withdrawal Request**
 
 👤 **User:** {user_info['name']} (ID: {user_id})
@@ -464,7 +459,7 @@ Use /approvewithdrawal {user_id} {amount} to approve this withdrawal."""
 
 async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get bank name"""
-    context.user_data['bank_name'] = update.message.text
+    context.user_data['bank_name'] = update.message.text.strip()
     
     await update.message.reply_text(
         "Please enter your account number:",
@@ -474,7 +469,7 @@ async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get account number"""
-    context.user_data['account_number'] = update.message.text
+    context.user_data['account_number'] = update.message.text.strip()
     
     await update.message.reply_text(
         "Please enter your routing number:",
@@ -484,9 +479,8 @@ async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get routing number and process bank withdrawal"""
-    context.user_data['routing_number'] = update.message.text
+    context.user_data['routing_number'] = update.message.text.strip()
     
-    # Process bank withdrawal
     user_id = update.effective_user.id
     user_info = get_user_data(user_id)
     amount = context.user_data['withdraw_amount']
@@ -494,7 +488,6 @@ async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE)
     account_number = context.user_data['account_number']
     routing_number = context.user_data['routing_number']
     
-    # Send to admin for approval
     admin_message = f"""💸 **Bank Withdrawal Request**
 
 👤 **User:** {user_info['name']} (ID: {user_id})
@@ -637,7 +630,11 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     """Return to main menu"""
     return await show_main_menu(update, context)
 
-# Admin commands
+async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Get user's Telegram ID"""
+    user_id = update.effective_user.id
+    await update.message.reply_text(f"Your User ID is: {user_id}")
+
 async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to approve deposits"""
     if update.effective_user.id != ADMIN_USER_ID:
@@ -662,7 +659,6 @@ async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         user_info['deposit'] += amount
         user_info['pending_deposit'] = 0
         
-        # Notify user
         try:
             await context.bot.send_message(
                 chat_id=user_id,
@@ -705,7 +701,6 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user_info['withdrawal'] += amount
         user_info['pending_withdrawal'] = 0
         
-        # Notify user
         try:
             await context.bot.send_message(
                 chat_id=user_id,
@@ -742,7 +737,6 @@ async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         user_info['profit'] += amount
         user_info['balance'] += amount
         
-        # Notify user
         try:
             await context.bot.send_message(
                 chat_id=user_id,
@@ -802,7 +796,6 @@ async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         user_info = user_data[user_id]
         user_info['approved'] = True
         
-        # Notify user
         try:
             await context.bot.send_message(
                 chat_id=user_id,
@@ -838,7 +831,6 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             users_list += f"🤖 Active Bot: {data['active_bot']}\n"
         users_list += "━━━━━━━━━━━━━━━━━━━━\n"
     
-    # Split message if too long
     if len(users_list) > 4000:
         parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
         for part in parts:
@@ -893,84 +885,80 @@ def main() -> None:
         logger.error("ADMIN_USER_ID environment variable not set!")
         return
     
-    # Create application
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Create conversation handler
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
             WAITING_NAME: [
-                CallbackQueryHandler(start_registration, pattern='^start_registration),
+                CallbackQueryHandler(start_registration, pattern='^start_registration$'),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_name),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel)
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             WAITING_EMAIL: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_email),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel)
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             WAITING_PHONE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel)
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             MAIN_MENU: [
-                CallbackQueryHandler(show_main_menu, pattern='^proceed_to_menu),
-                CallbackQueryHandler(back_to_menu, pattern='^back_to_menu),
-                CallbackQueryHandler(refresh_balance, pattern='^refresh_balance),
-                CallbackQueryHandler(visit_website, pattern='^visit_website),
-                CallbackQueryHandler(handle_deposit, pattern='^deposit),
-                CallbackQueryHandler(show_crypto_options, pattern='^deposit_crypto),
+                CallbackQueryHandler(show_main_menu, pattern='^proceed_to_menu$'),
+                CallbackQueryHandler(back_to_menu, pattern='^back_to_menu$'),
+                CallbackQueryHandler(refresh_balance, pattern='^refresh_balance$'),
+                CallbackQueryHandler(visit_website, pattern='^visit_website$'),
+                CallbackQueryHandler(handle_deposit, pattern='^deposit$'),
+                CallbackQueryHandler(show_crypto_options, pattern='^deposit_crypto$'),
                 CallbackQueryHandler(handle_crypto_selection, pattern='^crypto_select_'),
                 CallbackQueryHandler(copy_address, pattern='^copy_address_'),
-                CallbackQueryHandler(payment_made, pattern='^payment_made),
-                CallbackQueryHandler(handle_withdrawal, pattern='^withdraw),
-                CallbackQueryHandler(withdraw_crypto_amount, pattern='^withdraw_crypto),
-                CallbackQueryHandler(withdraw_bank_amount, pattern='^withdraw_bank),
-                CallbackQueryHandler(show_copy_trade, pattern='^copy_trade),
+                CallbackQueryHandler(payment_made, pattern='^payment_made$'),
+                CallbackQueryHandler(handle_withdrawal, pattern='^withdraw$'),
+                CallbackQueryHandler(withdraw_crypto_amount, pattern='^withdraw_crypto$'),
+                CallbackQueryHandler(withdraw_bank_amount, pattern='^withdraw_bank$'),
+                CallbackQueryHandler(show_copy_trade, pattern='^copy_trade$'),
                 CallbackQueryHandler(select_trading_bot, pattern='^select_bot_'),
-                CallbackQueryHandler(handle_stake, pattern='^stake),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel)
+                CallbackQueryHandler(handle_stake, pattern='^stake$'),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             DEPOSIT_AMOUNT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_deposit_amount),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel)
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             DEPOSIT_PROOF: [
                 MessageHandler(filters.PHOTO, get_deposit_proof),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel)
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             WITHDRAW_AMOUNT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_withdraw_amount),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel)
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             WITHDRAW_CRYPTO_ADDRESS: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_crypto_address),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel)
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             WITHDRAW_BANK_NAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_bank_name),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel)
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             WITHDRAW_ACCOUNT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_account_number),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel)
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             WITHDRAW_ROUTING: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_routing_number),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel)
-            ]
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
+            ],
         },
         fallbacks=[
             CommandHandler("start", start),
-            CallbackQueryHandler(cancel_operation, pattern='^cancel)
+            CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
         ],
         per_message=False
     )
     
-    # Add handlers
     application.add_handler(conv_handler)
-    
-    # Admin commands
+    application.add_handler(CommandHandler("getid", get_id))
     application.add_handler(CommandHandler("approve", approve_deposit))
     application.add_handler(CommandHandler("approvewithdrawal", approve_withdrawal))
     application.add_handler(CommandHandler("updateprofit", update_profit))
@@ -979,10 +967,8 @@ def main() -> None:
     application.add_handler(CommandHandler("listusers", list_users))
     application.add_handler(CommandHandler("adminhelp", admin_help))
     
-    # Error handler
     application.add_error_handler(error_handler)
     
-    # Start the bot
     logger.info("Starting NCW Trading Bot...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
