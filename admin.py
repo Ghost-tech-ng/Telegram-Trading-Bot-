@@ -21,7 +21,8 @@ def create_cancel_keyboard():
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show admin panel with options"""
     user_id = update.effective_user.id
-    if user_id != ADMIN_USER_ID:  # ADMIN_USER_ID is from bot.py environment
+    admin_id = context.job.data.get('admin_id') if context.job else int(context.bot_data.get('admin_id', 0))
+    if not admin_id or user_id != admin_id:
         await update.message.reply_text("❌ Unauthorized access.")
         return
     panel_text = """🛠 **NCW Trading Bot Admin Panel** 🛠
@@ -44,7 +45,8 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
-    if user_id != ADMIN_USER_ID:
+    admin_id = context.job.data.get('admin_id') if context.job else int(context.bot_data.get('admin_id', 0))
+    if not admin_id or user_id != admin_id:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="❌ Unauthorized access."
@@ -61,12 +63,12 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         users_list = """👥 **Registered Users** 👥
 
 Below is a detailed list of all registered users:\n\n"""
-        for user_id, data in user_data.items():
+        for uid, data in user_data.items():
             status = "✅ Approved" if data['approved'] else "⏳ Pending"
             bot = data['active_bot'] if data['active_bot'] else "None"
             pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
             pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
-            users_list += f"🆔 **{user_id}** - {data['name']}\n" + \
+            users_list += f"🆔 **{uid}** - {data['name']}\n" + \
                           f"📧 {data['email']}\n" + \
                           f"📱 {data['phone']}\n" + \
                           f"💰 Balance: ${data['balance']:.2f}\n" + \
@@ -135,41 +137,49 @@ Below is a detailed list of all registered users:\n\n"""
 Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
 
 👥 **List Users**
+
 - View all registered users with details (ID, name, email, balance, etc.).
 - Use the 'List Users' button or /listusers.
 
 ✅ **Approve User**
+
 - Approve a user's account to grant access to trading features.
 - Command: /approveuser <user_id>
 - Example: /approveuser 123456789
 - Alternatively, use the 'Approve' button in registration notifications.
 
 💳 **Approve Deposit**
+
 - Confirm a user's deposit to update their balance.
 - Command: /approve <user_id> <amount>
 - Example: /approve 123456789 1000.50
 - Alternatively, use the 'Approve' button in deposit notifications.
 
 💸 **Approve Withdrawal**
+
 - Process a user's withdrawal request.
 - Command: /approvewithdrawal <user_id> <amount>
 - Example: /approvewithdrawal 123456789 500.25
 - Alternatively, use the 'Approve' button in withdrawal notifications.
 
 📈 **Update Profit**
+
 - Add profit to a user's account based on trading bot performance.
 - Command: /updateprofit <user_id> <amount>
 - Example: /updateprofit 123456789 250.75
 
 🪙 **Update Crypto Address**
+
 - Change the wallet address for a cryptocurrency.
 - Command: /updatecrypto <crypto_name> <address>
 - Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
 
 ℹ️ **Help**
+
 - Review this guide anytime with /adminhelp or the 'Help' button.
 
 **Tips:**
+
 - Use /getid to find a user's ID.
 - Check deposit notifications for pending approvals.
 - All commands are case-sensitive."""
@@ -182,7 +192,8 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and 
 async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to approve deposits"""
     user_id = update.effective_user.id
-    if user_id != ADMIN_USER_ID:
+    admin_id = context.bot_data.get('admin_id', 0)
+    if not admin_id or user_id != int(admin_id):
         await update.message.reply_text("❌ Unauthorized access.")
         return
     try:
@@ -214,7 +225,8 @@ async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to approve withdrawals"""
     user_id = update.effective_user.id
-    if user_id != ADMIN_USER_ID:
+    admin_id = context.bot_data.get('admin_id', 0)
+    if not admin_id or user_id != int(admin_id):
         await update.message.reply_text("❌ Unauthorized access.")
         return
     try:
@@ -249,7 +261,8 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to update user profits"""
     user_id = update.effective_user.id
-    if user_id != ADMIN_USER_ID:
+    admin_id = context.bot_data.get('admin_id', 0)
+    if not admin_id or user_id != int(admin_id):
         await update.message.reply_text("❌ Unauthorized access.")
         return
     try:
@@ -280,7 +293,8 @@ async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to update crypto addresses"""
     user_id = update.effective_user.id
-    if user_id != ADMIN_USER_ID:
+    admin_id = context.bot_data.get('admin_id', 0)
+    if not admin_id or user_id != int(admin_id):
         await update.message.reply_text("❌ Unauthorized access.")
         return
     try:
@@ -301,7 +315,8 @@ async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TY
 async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to approve user accounts"""
     user_id = update.effective_user.id
-    if user_id != ADMIN_USER_ID:
+    admin_id = context.bot_data.get('admin_id', 0)
+    if not admin_id or user_id != int(admin_id):
         await update.message.reply_text("❌ Unauthorized access.")
         return
     try:
@@ -334,7 +349,8 @@ async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to list all users"""
     user_id = update.effective_user.id
-    if user_id != ADMIN_USER_ID:
+    admin_id = context.bot_data.get('admin_id', 0)
+    if not admin_id or user_id != int(admin_id):
         await update.message.reply_text("❌ Unauthorized access.")
         return
     if not user_data:
@@ -343,12 +359,12 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     users_list = """👥 **Registered Users** 👥
 
 Below is a detailed list of all registered users:\n\n"""
-    for user_id, data in user_data.items():
+    for uid, data in user_data.items():
         status = "✅ Approved" if data['approved'] else "⏳ Pending"
         bot = data['active_bot'] if data['active_bot'] else "None"
         pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
         pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
-        users_list += f"🆔 **{user_id}** - {data['name']}\n" + \
+        users_list += f"🆔 **{uid}** - {data['name']}\n" + \
                       f"📧 {data['email']}\n" + \
                       f"📱 {data['phone']}\n" + \
                       f"💰 Balance: ${data['balance']:.2f}\n" + \
@@ -374,7 +390,8 @@ Below is a detailed list of all registered users:\n\n"""
 async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show admin commands"""
     user_id = update.effective_user.id
-    if user_id != ADMIN_USER_ID:
+    admin_id = context.bot_data.get('admin_id', 0)
+    if not admin_id or user_id != int(admin_id):
         await update.message.reply_text("❌ Unauthorized access.")
         return
     help_text = """🛠 **Admin Panel Guide** 🛠
@@ -382,41 +399,49 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and how to use them:
 
 👥 **List Users**
+
 - View all registered users with details (ID, name, email, balance, etc.).
 - Use the 'List Users' button or /listusers.
 
 ✅ **Approve User**
+
 - Approve a user's account to grant access to trading features.
 - Command: /approveuser <user_id>
 - Example: /approveuser 123456789
 - Alternatively, use the 'Approve' button in registration notifications.
 
 💳 **Approve Deposit**
+
 - Confirm a user's deposit to update their balance.
 - Command: /approve <user_id> <amount>
 - Example: /approve 123456789 1000.50
 - Alternatively, use the 'Approve' button in deposit notifications.
 
 💸 **Approve Withdrawal**
+
 - Process a user's withdrawal request.
 - Command: /approvewithdrawal <user_id> <amount>
 - Example: /approvewithdrawal 123456789 500.25
 - Alternatively, use the 'Approve' button in withdrawal notifications.
 
 📈 **Update Profit**
+
 - Add profit to a user's account based on trading bot performance.
 - Command: /updateprofit <user_id> <amount>
 - Example: /updateprofit 123456789 250.75
 
 🪙 **Update Crypto Address**
+
 - Change the wallet address for a cryptocurrency.
 - Command: /updatecrypto <crypto_name> <address>
 - Example: /updatecrypto Bitcoin 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
 
 ℹ️ **Help**
+
 - Review this guide anytime with /adminhelp or the 'Help' button.
 
 **Tips:**
+
 - Use /getid to find a user's ID.
 - Check deposit notifications for pending approvals.
 - All commands are case-sensitive."""
@@ -424,6 +449,10 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available actions and 
 
 async def send_admin_panel(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send admin panel to admin on bot startup"""
+    admin_id = context.job.data.get('admin_id', 0)
+    if not admin_id:
+        logger.error("Admin ID not provided in job data.")
+        return
     panel_text = """🛠 **NCW Trading Bot Admin Panel** 🛠
 
 Welcome to the admin control center. Manage users, transactions, and system settings below."""
@@ -439,7 +468,7 @@ Welcome to the admin control center. Manage users, transactions, and system sett
     reply_markup = InlineKeyboardMarkup(keyboard)
     try:
         await context.bot.send_message(
-            chat_id=ADMIN_USER_ID,
+            chat_id=admin_id,
             text=panel_text,
             reply_markup=reply_markup,
             parse_mode='Markdown'
