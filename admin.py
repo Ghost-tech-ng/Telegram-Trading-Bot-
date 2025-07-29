@@ -44,6 +44,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Handle admin panel button actions"""
     query = update.callback_query
     await query.answer()
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Processing action...")
     user_id = update.effective_user.id
     admin_id = context.job.data.get('admin_id') if context.job else int(context.bot_data.get('admin_id', 0))
     if not admin_id or user_id != admin_id:
