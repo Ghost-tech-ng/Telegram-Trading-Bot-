@@ -9,7 +9,7 @@ from telegram.error import TelegramError
 # Enable logging
 logger = logging.getLogger(__name__)
 
-# In-memory storage (will be shared with bot.py)
+# These will be shared from bot.py
 user_data = {}
 crypto_addresses = {}
 
@@ -21,7 +21,7 @@ def create_cancel_keyboard():
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show admin panel with options"""
     user_id = update.effective_user.id
-    admin_id = int(context.bot_data.get('admin_id', 0))
+    admin_id = context.bot_data.get('admin_id', 0)
     
     if not admin_id or user_id != admin_id:
         await update.message.reply_text("❌ Unauthorized access.")
@@ -48,7 +48,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     
     user_id = update.effective_user.id
-    admin_id = int(context.bot_data.get('admin_id', 0))
+    admin_id = context.bot_data.get('admin_id', 0)
     
     if not admin_id or user_id != admin_id:
         await context.bot.send_message(
@@ -58,6 +58,45 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     
     action = query.data
+    
+    # Handle approve_user_ pattern (from user registration)
+    if action.startswith('approve_user_'):
+        user_id_str = action.replace('approve_user_', '')
+        try:
+            target_user_id = int(user_id_str)
+            
+            if target_user_id not in user_data:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="❌ User not found."
+                )
+                return
+            
+            user_info = user_data[target_user_id]
+            user_info['approved'] = True
+            
+            keyboard = [[InlineKeyboardButton("✅ Proceed", callback_data='proceed_to_menu')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            try:
+                await context.bot.send_message(
+                    chat_id=target_user_id,
+                    text=f"🎉 Your account has been approved!",
+                    reply_markup=reply_markup
+                )
+            except TelegramError as e:
+                logger.error(f"Failed to notify user {target_user_id}: {e}")
+            
+            await query.edit_message_text(
+                f"{query.message.text}\n\n✅ **User Approved** - {user_info['name']} (ID: {target_user_id})"
+            )
+            
+        except ValueError:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ Invalid user ID format."
+            )
+        return
     
     if action == 'admin_list_users':
         if not user_data:
@@ -161,7 +200,7 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available commands:
 async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to approve deposits"""
     user_id = update.effective_user.id
-    admin_id = int(context.bot_data.get('admin_id', 0))
+    admin_id = context.bot_data.get('admin_id', 0)
     
     if not admin_id or user_id != admin_id:
         await update.message.reply_text("❌ Unauthorized access.")
@@ -202,7 +241,7 @@ async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to approve withdrawals"""
     user_id = update.effective_user.id
-    admin_id = int(context.bot_data.get('admin_id', 0))
+    admin_id = context.bot_data.get('admin_id', 0)
     
     if not admin_id or user_id != admin_id:
         await update.message.reply_text("❌ Unauthorized access.")
@@ -248,7 +287,7 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to update user profits"""
     user_id = update.effective_user.id
-    admin_id = int(context.bot_data.get('admin_id', 0))
+    admin_id = context.bot_data.get('admin_id', 0)
     
     if not admin_id or user_id != admin_id:
         await update.message.reply_text("❌ Unauthorized access.")
@@ -288,7 +327,7 @@ async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to update crypto addresses"""
     user_id = update.effective_user.id
-    admin_id = int(context.bot_data.get('admin_id', 0))
+    admin_id = context.bot_data.get('admin_id', 0)
     
     if not admin_id or user_id != admin_id:
         await update.message.reply_text("❌ Unauthorized access.")
@@ -318,7 +357,7 @@ async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TY
 async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to approve user accounts"""
     user_id = update.effective_user.id
-    admin_id = int(context.bot_data.get('admin_id', 0))
+    admin_id = context.bot_data.get('admin_id', 0)
     
     if not admin_id or user_id != admin_id:
         await update.message.reply_text("❌ Unauthorized access.")
@@ -359,7 +398,7 @@ async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to list all users"""
     user_id = update.effective_user.id
-    admin_id = int(context.bot_data.get('admin_id', 0))
+    admin_id = context.bot_data.get('admin_id', 0)
     
     if not admin_id or user_id != admin_id:
         await update.message.reply_text("❌ Unauthorized access.")
@@ -405,7 +444,7 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show admin commands"""
     user_id = update.effective_user.id
-    admin_id = int(context.bot_data.get('admin_id', 0))
+    admin_id = context.bot_data.get('admin_id', 0)
     
     if not admin_id or user_id != admin_id:
         await update.message.reply_text("❌ Unauthorized access.")
@@ -427,7 +466,7 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available commands:
 
 async def send_admin_panel(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send admin panel to admin on bot startup"""
-    admin_id = int(context.job.data.get('admin_id', 0))
+    admin_id = context.job.data.get('admin_id', 0)
     
     if not admin_id:
         logger.error("Admin ID not provided in job data.")
