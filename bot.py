@@ -235,6 +235,23 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     return MAIN_MENU
 
+async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Return to the main menu"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    admin_id = get_admin_id()
+    
+    if user_id == admin_id:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Admins cannot access user features."
+        )
+        return ConversationHandler.END
+        
+    return await show_main_menu(update, context)
+
 async def handle_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle deposit request"""
     user_id = update.effective_user.id
