@@ -41,9 +41,9 @@ def get_admin_id() -> int:
 # In-memory storage
 user_data: Dict[int, Dict[str, Any]] = {}
 crypto_addresses = {
-    'Bitcoin': '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa',
-    'Ethereum': '0x1234567890abcdef1234567890abcdef12345678',
-    'USDT': '0xabcdef1234567890abcdef1234567890abcdef12'
+    'Bitcoin': 'bc1qe4tluz39ac4zm3srnfnq5t9jpwrud256yw7g4j',
+    'Ethereum': '0xAB8aDbEEb9E953db7687Fbb0E070aA9635E9D8D5',
+    'USDT': '0xAB8aDbEEb9E953db7687Fbb0E070aA9635E9D8D5'
 }
 
 trading_bots = {
