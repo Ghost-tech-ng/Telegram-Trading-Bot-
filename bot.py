@@ -971,7 +971,11 @@ def main() -> None:
     """Start the bot and send admin panel"""
     application = Application.builder().token(BOT_TOKEN).build()
 
-    from admin import send_admin_panel, admin_panel  # Import admin functions
+    from admin import (
+        send_admin_panel, admin_panel, handle_admin_action,
+        approve_deposit, approve_withdrawal, update_profit,
+        update_crypto_address, approve_user, list_users, admin_help
+    )  # Import all necessary admin functions
 
     # Schedule send_admin_panel with admin_id check
     admin_id = get_admin_id()
@@ -1048,9 +1052,22 @@ def main() -> None:
         per_message=False
     )
 
+    # Add handlers for user commands
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("getid", get_id))
+
+    # Add handlers for admin commands
     application.add_handler(CommandHandler("adminpanel", admin_panel))
+    application.add_handler(CallbackQueryHandler(handle_admin_action, pattern='^admin_'))
+    application.add_handler(CommandHandler("approve", approve_deposit))
+    application.add_handler(CommandHandler("approvewithdrawal", approve_withdrawal))
+    application.add_handler(CommandHandler("updateprofit", update_profit))
+    application.add_handler(CommandHandler("updatecrypto", update_crypto_address))
+    application.add_handler(CommandHandler("approveuser", approve_user))
+    application.add_handler(CommandHandler("listusers", list_users))
+    application.add_handler(CommandHandler("adminhelp", admin_help))
+
+    # Add error handler
     application.add_error_handler(error_handler)
 
     logger.info("Starting NCW Trading Bot...")
