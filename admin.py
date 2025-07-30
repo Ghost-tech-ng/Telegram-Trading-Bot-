@@ -36,6 +36,7 @@ Welcome to the admin control center. Manage users, transactions, and system sett
         [InlineKeyboardButton("💸 Approve Withdrawal", callback_data='admin_approve_withdrawal')],
         [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
         [InlineKeyboardButton("🪙 Update Crypto Address", callback_data='admin_update_crypto')],
+        [InlineKeyboardButton("📩 Send Login Details", callback_data='admin_send_login')],
         [InlineKeyboardButton("ℹ️ Help", callback_data='admin_help')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -131,6 +132,13 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=create_cancel_keyboard()
         )
     
+    elif action == 'admin_send_login':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please enter: /sendlogin <user_id> <username> <password>",
+            reply_markup=create_cancel_keyboard()
+        )
+    
     elif action == 'admin_help':
         help_text = """🛠 **Admin Panel Guide** 🛠
 
@@ -141,6 +149,7 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available commands:
 💸 /approvewithdrawal <user_id> <amount> - Approve a withdrawal
 📈 /updateprofit <user_id> <amount> - Update user's profit
 🪙 /updatecrypto <crypto> <address> - Update crypto address
+📩 /sendlogin <user_id> <username> <password> - Send login details to user
 ℹ️ /adminhelp - Show this help message"""
         
         await context.bot.send_message(
@@ -306,6 +315,55 @@ async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TY
     except IndexError:
         await update.message.reply_text("❌ Invalid format. Usage: /updatecrypto <crypto_name> <address>")
 
+async def send_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to send website login details to a user"""
+    user_id = update.effective_user.id
+    admin_id = int(context.bot_data.get('admin_id', 0))
+    
+    if not admin_id or user_id != admin_id:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 3:
+            await update.message.reply_text("Usage: /sendlogin <user_id> <username> <password>")
+            return
+        
+        target_user_id = int(args[0])
+        username = args[1]
+        password = args[2]
+        
+        if target_user_id not in user_data:
+            await update.message.reply_text("❌ User not found.")
+            return
+        
+        user_info = user_data[target_user_id]
+        login_message = f"""🌐 **Your Website Login Details**
+
+👤 **Name:** {user_info['name']}
+🆔 **User ID:** {target_user_id}
+📧 **Email:** {user_info['email']}
+🔐 **Username:** {username}
+🔑 **Password:** {password}
+
+Please log in at https://novacapitalwealthpro.com to access your account. Keep these details secure and do not share them."""
+        
+        try:
+            await context.bot.send_message(
+                chat_id=target_user_id,
+                text=login_message,
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]]),
+                parse_mode='Markdown'
+            )
+            await update.message.reply_text(f"✅ Sent login details to user {target_user_id}.")
+        except TelegramError as e:
+            logger.error(f"Failed to send login details to user {target_user_id}: {e}")
+            await update.message.reply_text(f"❌ Failed to send login details to user {target_user_id}.")
+    
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /sendlogin <user_id> <username> <password>")
+
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to list all users"""
     user_id = update.effective_user.id
@@ -370,6 +428,7 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available commands:
 💸 /approvewithdrawal <user_id> <amount> - Approve a withdrawal
 📈 /updateprofit <user_id> <amount> - Update user's profit
 🪙 /updatecrypto <crypto> <address> - Update crypto address
+📩 /sendlogin <user_id> <username> <password> - Send login details to user
 ℹ️ /adminhelp - Show this help message"""
     
     await update.message.reply_text(help_text, parse_mode='Markdown')
@@ -391,6 +450,7 @@ Welcome to the admin control center. Manage users, transactions, and system sett
         [InlineKeyboardButton("💸 Approve Withdrawal", callback_data='admin_approve_withdrawal')],
         [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
         [InlineKeyboardButton("🪙 Update Crypto Address", callback_data='admin_update_crypto')],
+        [InlineKeyboardButton("📩 Send Login Details", callback_data='admin_send_login')],
         [InlineKeyboardButton("ℹ️ Help", callback_data='admin_help')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)

