@@ -1072,6 +1072,6 @@ def main() -> None:
 
     logger.info("Starting NCW Trading Bot...")
     application.run_polling(allowed_updates=Update.ALL_TYPES, timeout=30)
-
+    
 if __name__ == '__main__':
     main()

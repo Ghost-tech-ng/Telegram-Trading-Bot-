@@ -23,7 +23,10 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     user_id = update.effective_user.id
     admin_id = int(context.bot_data.get('admin_id', 0))
     
+    logger.info(f"Admin panel accessed - user_id: {user_id}, admin_id: {admin_id}")
+    
     if not admin_id or user_id != admin_id:
+        logger.warning(f"Unauthorized access attempt - user_id: {user_id}, admin_id: {admin_id}")
         await update.message.reply_text("❌ Unauthorized access.")
         return
     
@@ -41,7 +44,7 @@ Welcome to the admin control center. Manage users, transactions, and system sett
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(panel_text, reply_markup=reply_markup, parse_mode='Markdown')
-
+    
 async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle admin panel button actions"""
     query = update.callback_query
