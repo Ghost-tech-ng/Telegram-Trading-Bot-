@@ -2,13 +2,10 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.error import TelegramError
+from storage import user_data, crypto_addresses
 
 # Enable logging
 logger = logging.getLogger(__name__)
-
-# In-memory storage (will be shared with bot.py)
-user_data = {}
-crypto_addresses = {}
 
 def create_cancel_keyboard():
     """Create a keyboard with cancel button"""
@@ -177,7 +174,8 @@ async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         amount = float(args[1])
         
         if target_user_id not in user_data:
-            await update.message.reply_text("❌ User not found.")
+            logger.error(f"User {target_user_id} not found for deposit approval")
+            await update.message.reply_text(f"❌ User {target_user_id} not found. Use /listusers to see registered users.")
             return
         
         user_info = user_data[target_user_id]
@@ -188,9 +186,10 @@ async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         try:
             await context.bot.send_message(
                 chat_id=target_user_id,
-                text=f"✅ Your deposit of ${amount:.2f} has been confirmed!",
+                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
             )
+            logger.info(f"Notified user {target_user_id} of deposit approval for ${amount:.2f}")
         except TelegramError as e:
             logger.error(f"Failed to notify user {target_user_id}: {e}")
         
@@ -218,7 +217,7 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         amount = float(args[1])
         
         if target_user_id not in user_data:
-            await update.message.reply_text("❌ User not found.")
+            await update.message.reply_text(f"❌ User {target_user_id} not found. Use /listusers to see registered users.")
             return
         
         user_info = user_data[target_user_id]
@@ -234,7 +233,7 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         try:
             await context.bot.send_message(
                 chat_id=target_user_id,
-                text=f"✅ Your withdrawal of ${amount:.2f} has been processed!",
+                text=f"✅ Your withdrawal of ${amount:.2f} has been processed! Your new balance is ${user_info['balance']:.2f}.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
             )
         except TelegramError as e:
@@ -264,7 +263,7 @@ async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         amount = float(args[1])
         
         if target_user_id not in user_data:
-            await update.message.reply_text("❌ User not found.")
+            await update.message.reply_text(f"❌ User {target_user_id} not found. Use /listusers to see registered users.")
             return
         
         user_info = user_data[target_user_id]
@@ -274,7 +273,7 @@ async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         try:
             await context.bot.send_message(
                 chat_id=target_user_id,
-                text=f"🎉 You've earned ${amount:.2f} in profits!",
+                text=f"🎉 You've earned ${amount:.2f} in profits! Your new balance is ${user_info['balance']:.2f}.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
             )
         except TelegramError as e:
@@ -335,7 +334,7 @@ async def send_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         password = args[2]
         
         if target_user_id not in user_data:
-            await update.message.reply_text("❌ User not found.")
+            await update.message.reply_text(f"❌ User {target_user_id} not found. Use /listusers to see registered users.")
             return
         
         user_info = user_data[target_user_id]
