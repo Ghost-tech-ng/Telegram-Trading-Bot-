@@ -463,7 +463,7 @@ async def get_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return ConversationHandler.END
         
     user_info = get_user_data(user_id)
-    amount = context.user_data.get('deposit_amount', 0)
+    amount = context.user_data.get('deposit_amount', 0.0)
     crypto_name = context.user_data.get('selected_crypto', 'Unknown')
     
     context.user_data['deposit_message_id'] = update.message.message_id if update.message else None
@@ -490,6 +490,7 @@ Click 'Approve' to confirm this deposit."""
             parse_mode='Markdown'
         )
         context.user_data['admin_deposit_message_id'] = message.message_id
+        logger.info(f"Sent deposit request for user {user_id} to admin {admin_id} with message ID {message.message_id}")
         
         if update.message.photo:
             await context.bot.forward_message(
@@ -497,9 +498,10 @@ Click 'Approve' to confirm this deposit."""
                 from_chat_id=update.effective_chat.id,
                 message_id=update.message.message_id
             )
+            logger.info(f"Forwarded deposit proof photo for user {user_id} to admin {admin_id}")
             
     except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
+        logger.error(f"Failed to send admin notification for user {user_id}: {e}")
         await update.message.reply_text(
             "⚠️ Failed to process deposit proof. Please try again or contact support.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
@@ -519,7 +521,10 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
     await query.answer()
     
     admin_id = get_admin_id()
-    if update.effective_user.id != admin_id:
+    user_id = update.effective_user.id
+    
+    if user_id != admin_id:
+        logger.warning(f"Unauthorized deposit confirmation attempt by user {user_id}")
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="❌ Unauthorized access."
@@ -527,40 +532,48 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
         return MAIN_MENU
         
     try:
-        _, user_id_str, amount_str = query.data.split('_')
-        user_id = int(user_id_str)
+        logger.info(f"Processing deposit confirmation with callback data: {query.data}")
+        _, user_id_str, amount_str = query.data.split('_', 2)
+        target_user_id = int(user_id_str)
         amount = float(amount_str)
         
-        if user_id not in user_data:
+        if target_user_id not in user_data:
+            logger.error(f"User {target_user_id} not found for deposit confirmation")
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text="❌ User not found."
             )
             return MAIN_MENU
             
-        user_info = get_user_data(user_id)
+        user_info = get_user_data(target_user_id)
         user_info['balance'] += amount
         user_info['deposit'] += amount
         user_info['pending_deposit'] = 0
         
+        logger.info(f"Approved deposit of ${amount:.2f} for user {target_user_id}. New balance: ${user_info['balance']:.2f}")
+        
         try:
             await context.bot.send_message(
-                chat_id=user_id,
+                chat_id=target_user_id,
                 text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
             )
+            logger.info(f"Notified user {target_user_id} of deposit confirmation")
         except TelegramError as e:
-            logger.error(f"Failed to notify user {user_id}: {e}")
+            logger.error(f"Failed to notify user {target_user_id} of deposit confirmation: {e}")
             
         await query.edit_message_text(
-            f"{query.message.text}\n\n✅ **Deposit Approved** for user {user_id}."
+            f"{query.message.text}\n\n✅ **Deposit Approved** for user {target_user_id}."
         )
+        logger.info(f"Updated admin message for deposit confirmation for user {target_user_id}")
+        
         return MAIN_MENU
         
-    except ValueError:
+    except (ValueError, IndexError) as e:
+        logger.error(f"Error processing deposit confirmation: {e}")
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="❌ Invalid format."
+            text="❌ Invalid format or error processing deposit. Please use /approve <user_id> <amount> manually."
         )
         return MAIN_MENU
 
@@ -1189,6 +1202,7 @@ def main() -> None:
                 CallbackQueryHandler(show_trading_bot, pattern='^trading_bot$'),
                 CallbackQueryHandler(select_trading_bot, pattern='^select_bot_'),
                 CallbackQueryHandler(handle_stake, pattern='^stake$'),
+                CallbackQueryHandler(approve_withdrawal_button, pattern='^approve_withdrawal_'),
                 CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             DEPOSIT_AMOUNT: [
