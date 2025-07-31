@@ -112,4 +112,4 @@ Create a Pull Request.
 License
 This project is licensed under the MIT License.
 Contact
-For issues or feature requests, open a GitHub issue or contact the project maintainer at [ghosttechng@gmail.com].
+For issues or feature requests, open a GitHub issue or contact the project maintainer.
