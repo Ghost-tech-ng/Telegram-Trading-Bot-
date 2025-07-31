@@ -399,7 +399,7 @@ Click "Copy Address" to automatically copy the wallet address to your clipboard.
         return DEPOSIT_AMOUNT
 
 async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Send crypto address as copyable text and trigger clipboard copy"""
+    """Send crypto address as copyable text and attempt to trigger clipboard copy"""
     user_id = update.effective_user.id
     admin_id = get_admin_id()
     
@@ -416,22 +416,39 @@ async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     crypto_name = query.data.split('_')[-1]
     address = crypto_addresses[crypto_name]
     
-    # Send the address as plain text
+    # Send the address as plain text for manual copying
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=address
     )
     
-    # Send HTML message to trigger clipboard copy
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=f"""
-        <span class="tg-spoiler">{address}</span>
-        <script>navigator.clipboard.writeText('{address}');</script>
-        <b>Address copied to clipboard!</b>
-        """,
-        parse_mode='HTML'
-    )
+    # Attempt to trigger clipboard copy with HTML and JavaScript
+    try:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"""
+<span class="tg-spoiler">{address}</span>
+<script>
+try {{
+    navigator.clipboard.writeText('{address}').then(() => {{
+        console.log('Address copied to clipboard');
+    }}).catch(err => {{
+        console.error('Clipboard copy failed: ', err);
+    }});
+}} catch (e) {{
+    console.error('Clipboard API not supported: ', e);
+}}
+</script>
+<b>Address copied to clipboard!</b> If it didn't copy, please manually copy the address above.
+            """,
+            parse_mode='HTML'
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send clipboard copy message for user {user_id}: {e}")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"⚠️ Could not automatically copy the address. Please manually copy it: {address}"
+        )
     
     amount = context.user_data.get('deposit_amount', 0)
     keyboard = [
@@ -448,7 +465,7 @@ async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 🏦 **Wallet Address:** `{address}`
 ⚠️ **Security Warning:** Never share your payment details publicly. Only send to the address above.
 
-Click "Copy Address" to automatically copy the wallet address to your clipboard."""
+Click "Copy Address" to attempt automatic copying again or manually copy the address above."""
     
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -458,6 +475,7 @@ Click "Copy Address" to automatically copy the wallet address to your clipboard.
     )
     
     return DEPOSIT_PROOF
+
 
 async def payment_made(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle payment confirmation"""
