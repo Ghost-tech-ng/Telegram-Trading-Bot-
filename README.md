@@ -1,11 +1,11 @@
-Nova Capital Wealth Trading Bot
+Trading Bot
 A Telegram bot designed to facilitate cryptocurrency trading operations, including deposits, withdrawals, and trading bot activation. The bot supports multiple cryptocurrencies (Bitcoin, Ethereum, USDT, XRP, XLM, BNB, Solana) and provides a user-friendly interface for managing investments. It includes admin features for approving transactions and managing user data.
 Features
 
 User Registration: Collects user details (name, email, phone) for account setup.
 Deposit Management: Supports deposits in multiple cryptocurrencies with automatic clipboard copying for wallet addresses.
 Withdrawal Options: Allows withdrawals via cryptocurrency or bank transfer.
-Trading Bots: Offers multiple trading strategies (e.g., NCW Trading Bot, TrendSeeker) with configurable profit rates.
+Trading Bots: Offers multiple trading strategies with configurable profit rates.
 Admin Controls: Admins can approve deposits/withdrawals, update profits, manage crypto addresses, and view user data.
 Error Handling: Robust logging and error messages for reliable operation.
 
@@ -19,8 +19,8 @@ Dependencies listed in requirements.txt
 Installation
 
 Clone the Repository:
-git clone https://github.com/yourusername/nova-capital-wealth-bot.git
-cd nova-capital-wealth-bot
+git clone https://github.com/Ghost-tech-ng/Telegram-Trading-Bot-.git
+cd Telegram-Trading-Bot-
 
 
 Set Up a Virtual Environment (optional but recommended):
@@ -38,7 +38,7 @@ ADMIN_USER_ID=your_admin_telegram_user_id
 
 
 Directory Structure:Ensure the following files are in the project root:
-nova-capital-wealth-bot/
+Telegram-Trading-Bot-/
 ├── bot.py
 ├── admin.py
 ├── storage.py
@@ -112,4 +112,4 @@ Create a Pull Request.
 License
 This project is licensed under the MIT License.
 Contact
-For issues or feature requests, open a GitHub issue or contact the project maintainer at [your contact info].
+For issues or feature requests, open a GitHub issue or contact the project maintainer at [ghosttechng@gmail.com].
