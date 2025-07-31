@@ -383,8 +383,10 @@ async def get_deposit_amount(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 💰 **Amount:** ${amount:.2f}
 🪙 **Cryptocurrency:** {crypto_name}
-🏦 **Wallet Address:** {address}
-⚠️ **Security Warning:** Never share your payment details publicly. Only send to the address above."""
+🏦 **Wallet Address:** `{address}`
+⚠️ **Security Warning:** Never share your payment details publicly. Only send to the address above.
+
+Click "Copy Address" to automatically copy the wallet address to your clipboard."""
         
         await update.message.reply_text(message, reply_markup=reply_markup, parse_mode='Markdown')
         return DEPOSIT_PROOF
@@ -397,7 +399,7 @@ async def get_deposit_amount(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return DEPOSIT_AMOUNT
 
 async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Send crypto address as copyable text"""
+    """Send crypto address as copyable text and trigger clipboard copy"""
     user_id = update.effective_user.id
     admin_id = get_admin_id()
     
@@ -414,9 +416,21 @@ async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     crypto_name = query.data.split('_')[-1]
     address = crypto_addresses[crypto_name]
     
+    # Send the address as plain text
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=address
+    )
+    
+    # Send HTML message to trigger clipboard copy
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"""
+        <span class="tg-spoiler">{address}</span>
+        <script>navigator.clipboard.writeText('{address}');</script>
+        <b>Address copied to clipboard!</b>
+        """,
+        parse_mode='HTML'
     )
     
     amount = context.user_data.get('deposit_amount', 0)
@@ -431,8 +445,10 @@ async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 💰 **Amount:** ${amount:.2f}
 🪙 **Cryptocurrency:** {crypto_name}
-🏦 **Wallet Address:** {address}
-⚠️ **Security Warning:** Never share your payment details publicly. Only send to the address above."""
+🏦 **Wallet Address:** `{address}`
+⚠️ **Security Warning:** Never share your payment details publicly. Only send to the address above.
+
+Click "Copy Address" to automatically copy the wallet address to your clipboard."""
     
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -487,6 +503,7 @@ async def get_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 🪙 **Crypto:** {crypto_name}
 📱 **Phone:** {user_info['phone']}
 📧 **Email:** {user_info['email']}
+
 Click 'Approve' to confirm this deposit."""
     
     keyboard = [
@@ -734,6 +751,7 @@ async def get_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
 🏦 **Crypto Address:** {address}
 📱 **Phone:** {user_info['phone']}
 📧 **Email:** {user_info['email']}
+
 Click 'Approve' to confirm this withdrawal."""
     
     keyboard = [
@@ -822,6 +840,7 @@ async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE)
 🔢 **Routing:** {routing_number}
 📱 **Phone:** {user_info['phone']}
 📧 **Email:** {user_info['email']}
+
 Click 'Approve' to confirm this withdrawal."""
     
     keyboard = [
