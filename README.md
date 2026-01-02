@@ -4,7 +4,7 @@ Features
 
 User Registration: Collects user details (name, email, phone) for account setup.
 Deposit Management: Supports deposits in multiple cryptocurrencies with automatic clipboard copying for wallet addresses.
-Withdrawal Options: Allows withdrawals via cryptocurrency or bank transfer.
+Withdrawal Options: Allows withdrawals via cryptocurrency only (bank transfers removed).
 Trading Bots: Offers multiple trading strategies with configurable profit rates.
 Admin Controls: Admins can approve deposits/withdrawals, update profits, manage crypto addresses, and view user data.
 Error Handling: Robust logging and error messages for reliable operation.
@@ -59,7 +59,7 @@ Start the bot in Telegram by sending /start.
 Register with your name, email, and phone number.
 Use the main menu to:
 Deposit funds in supported cryptocurrencies.
-Withdraw funds via crypto or bank transfer.
+Withdraw funds via cryptocurrencies only.
 Activate trading bots with different strategies.
 Refresh balance or visit the website.
 

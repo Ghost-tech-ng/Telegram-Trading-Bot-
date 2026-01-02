@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # States for conversation handler
 (WAITING_NAME, WAITING_EMAIL, WAITING_PHONE, MAIN_MENU, 
  DEPOSIT_AMOUNT, DEPOSIT_PROOF, WITHDRAW_AMOUNT, WITHDRAW_CRYPTO_ADDRESS,
- WITHDRAW_BANK_NAME, WITHDRAW_ACCOUNT, WITHDRAW_ROUTING) = range(11)
+WITHDRAW_BANK_NAME, WITHDRAW_ACCOUNT, WITHDRAW_ROUTING) = (None, None, None)
 
 # Bot configuration
 BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -27,9 +27,13 @@ ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID', 0))
 # In-memory storage
 user_data: Dict[int, Dict[str, Any]] = {}
 crypto_addresses = {
-    'Bitcoin': '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa',
-    'Ethereum': '0x1234567890abcdef1234567890abcdef12345678',
-    'USDT': '0xabcdef1234567890abcdef1234567890abcdef12'
+    'Bitcoin': 'bc1qvy8t9tn96c55vq0mk2tzgkcaews23a0jldqlzr',
+    'Ethereum': '0x251601f4c7f9708a5a2E1A1A0ead87886D28FD6A',
+    'USDT(ERC20)': '0x251601f4c7f9708a5a2E1A1A0ead87886D28FD6A',
+    'XRP': 'rUfe1havVukiCcvvUupD5kCBkgMABjP1xk',
+    'XLM': 'GANOQPCXRJO6DOGT6BFPKMKG2EFP33EATNRSJUH3ZWDCZVISSXAMIF4F',
+    'BNB': '0x251601f4c7f9708a5a2E1A1A0ead87886D28FD6A',
+    'Solana': 'FivNN2VAtrsaNAoj6gYbKmZnebYy54R3uQmTM7mh72xF'
 }
 
 trading_bots = {
@@ -204,7 +208,7 @@ async def approve_user_button(update: Update, context: ContextTypes.DEFAULT_TYPE
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now visit our website and use all trading features.",
+                text=f"🎉 Congratulations {user_info['name']}! Your account has been approved. You can now visit our website and use all trading features.",
                 reply_markup=reply_markup
             )
         except TelegramError as e:
@@ -553,7 +557,7 @@ async def handle_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     
     keyboard = [
         [InlineKeyboardButton("₿ Crypto", callback_data='withdraw_crypto')],
-        [InlineKeyboardButton("🏦 Bank Transfer", callback_data='withdraw_bank')],
+        # Bank transfer option removed - only crypto
         [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -586,8 +590,8 @@ async def withdraw_crypto_amount(update: Update, context: ContextTypes.DEFAULT_T
     )
     return WITHDRAW_AMOUNT
 
-async def withdraw_bank_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get withdrawal amount for bank transfer"""
+# async def withdraw_bank_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#    """Get withdrawal amount for bank transfer"""
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
         await context.bot.send_message(
@@ -640,7 +644,7 @@ async def get_withdraw_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
                 "Please enter your bank name:",
                 reply_markup=create_cancel_keyboard()
             )
-            return WITHDRAW_BANK_NAME
+            # bank flow removed
             
     except ValueError:
         await update.message.reply_text(
@@ -699,8 +703,7 @@ Click 'Approve' to confirm this withdrawal."""
     )
     return MAIN_MENU
 
-async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get bank name"""
+## Bank flow removed in script.py
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
         await update.message.reply_text("Admins cannot access user features.")
@@ -711,10 +714,9 @@ async def get_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         "Please enter your account number:",
         reply_markup=create_cancel_keyboard()
     )
-    return WITHDRAW_ACCOUNT
+            # bank logic removed
 
-async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get account number"""
+## Bank flow removed in script.py
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
         await update.message.reply_text("Admins cannot access user features.")
@@ -725,10 +727,9 @@ async def get_account_number(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "Please enter your routing number:",
         reply_markup=create_cancel_keyboard()
     )
-    return WITHDRAW_ROUTING
+    # bank logic removed
 
-async def get_routing_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Get routing number and process bank withdrawal"""
+## Bank flow removed in script.py
     user_id = update.effective_user.id
     if user_id == ADMIN_USER_ID:
         await update.message.reply_text("Admins cannot access user features.")
@@ -1427,7 +1428,7 @@ async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"🎉 Great news {user_info['name']}! Your account has been approved. You can now visit our website and use all trading features.",
+                text=f"🎉 Congratulations {user_info['name']}! Your account has been approved. You can now visit our website and use all trading features.",
                 reply_markup=reply_markup
             )
         except TelegramError as e:
@@ -1571,112 +1572,3 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "⚠️ An error occurred. Please try again or contact support if the problem persists."
         )
 
-def main() -> None:
-    """Start the bot and send admin panel"""
-    if not BOT_TOKEN:
-        logger.error("BOT_TOKEN environment variable not set!")
-        return
-    
-    if not ADMIN_USER_ID:
-        logger.error("ADMIN_USER_ID environment variable not set!")
-        return
-    
-    application = Application.builder().token(BOT_TOKEN).build()
-    
-    # Send admin panel on startup
-    application.job_queue.run_once(send_admin_panel, 1)
-    
-    conv_handler = ConversationHandler(
-        entry_points=[
-            CommandHandler("start", start),
-            CommandHandler("adminpanel", admin_panel),
-        ],
-        states={
-            WAITING_NAME: [
-                CallbackQueryHandler(start_registration, pattern='^start_registration$'),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_name),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-            ],
-            WAITING_EMAIL: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_email),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-            ],
-            WAITING_PHONE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-            ],
-            MAIN_MENU: [
-                CallbackQueryHandler(show_main_menu, pattern='^proceed_to_menu$'),
-                CallbackQueryHandler(back_to_menu, pattern='^back_to_menu$'),
-                CallbackQueryHandler(refresh_balance, pattern='^refresh_balance$'),
-                CallbackQueryHandler(visit_website, pattern='^visit_website$'),
-                CallbackQueryHandler(handle_deposit, pattern='^deposit$'),
-                CallbackQueryHandler(show_crypto_options, pattern='^deposit_crypto$'),
-                CallbackQueryHandler(handle_crypto_selection, pattern='^crypto_select_'),
-                CallbackQueryHandler(copy_address, pattern='^copy_address_'),
-                CallbackQueryHandler(payment_made, pattern='^payment_made$'),
-                CallbackQueryHandler(handle_deposit_confirmation, pattern='^confirm_deposit_'),
-                CallbackQueryHandler(approve_user_button, pattern='^approve_user_'),
-                CallbackQueryHandler(approve_withdrawal_button, pattern='^approve_withdrawal_'),
-                CallbackQueryHandler(handle_withdrawal, pattern='^withdraw$'),
-                CallbackQueryHandler(withdraw_crypto_amount, pattern='^withdraw_crypto$'),
-                CallbackQueryHandler(withdraw_bank_amount, pattern='^withdraw_bank$'),
-                CallbackQueryHandler(show_copy_trade, pattern='^copy_trade$'),
-                CallbackQueryHandler(select_trading_bot, pattern='^select_bot_'),
-                CallbackQueryHandler(handle_stake, pattern='^stake$'),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-                CallbackQueryHandler(handle_admin_action, pattern='^admin_'),
-            ],
-            DEPOSIT_AMOUNT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_deposit_amount),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-            ],
-            DEPOSIT_PROOF: [
-                MessageHandler(filters.PHOTO, get_deposit_proof),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-            ],
-            WITHDRAW_AMOUNT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_withdraw_amount),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-            ],
-            WITHDRAW_CRYPTO_ADDRESS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_crypto_address),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-            ],
-            WITHDRAW_BANK_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_bank_name),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-            ],
-            WITHDRAW_ACCOUNT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_account_number),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-            ],
-            WITHDRAW_ROUTING: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_routing_number),
-                CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-            ],
-        },
-        fallbacks=[
-            CommandHandler("start", start),
-            CallbackQueryHandler(cancel_operation, pattern='^cancel$'),
-        ],
-        per_message=False
-    )
-    
-    application.add_handler(conv_handler)
-    application.add_handler(CommandHandler("getid", get_id))
-    application.add_handler(CommandHandler("approve", approve_deposit))
-    application.add_handler(CommandHandler("approvewithdrawal", approve_withdrawal))
-    application.add_handler(CommandHandler("updateprofit", update_profit))
-    application.add_handler(CommandHandler("updatecrypto", update_crypto_address))
-    application.add_handler(CommandHandler("approveuser", approve_user))
-    application.add_handler(CommandHandler("listusers", list_users))
-    application.add_handler(CommandHandler("adminhelp", admin_help))
-    
-    application.add_error_handler(error_handler)
-    
-    logger.info("Starting NCW Trading Bot...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES, timeout=30)
-
-if __name__ == '__main__':
-    main()

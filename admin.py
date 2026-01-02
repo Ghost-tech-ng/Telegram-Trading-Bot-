@@ -2,7 +2,6 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.error import TelegramError
-from storage import user_data, crypto_addresses
 
 # Enable logging
 logger = logging.getLogger(__name__)
@@ -29,6 +28,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 Welcome to the admin control center. Manage users, transactions, and system settings below."""
     keyboard = [
         [InlineKeyboardButton("👥 List Users", callback_data='admin_list_users')],
+        [InlineKeyboardButton("✅ Approve User", callback_data='admin_approve_user')],  # NEW LINE
         [InlineKeyboardButton("💳 Approve Deposit", callback_data='admin_approve_deposit')],
         [InlineKeyboardButton("💸 Approve Withdrawal", callback_data='admin_approve_withdrawal')],
         [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
@@ -38,6 +38,152 @@ Welcome to the admin control center. Manage users, transactions, and system sett
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(panel_text, reply_markup=reply_markup, parse_mode='Markdown')
+
+async def cancel_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Cancel admin action"""
+    query = update.callback_query
+    await query.answer()
+    
+    await query.edit_message_text("❌ Action cancelled.")
+
+async def approve_pending_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Approve a selected pending user"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    admin_id = int(context.bot_data.get('admin_id', 0))
+    
+    if not admin_id or user_id != admin_id:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Unauthorized access."
+        )
+        return
+    
+    try:
+        target_user_id = int(query.data.split('_')[-1])
+        
+        from database import db
+        user_info = db.get_user(target_user_id)
+        
+        if not user_info or not user_info.get('name'):
+            await query.edit_message_text("❌ User not found.")
+            return
+        
+        if user_info.get('approved', False):
+            await query.edit_message_text(
+                f"✅ User {user_info['name']} (ID: {target_user_id}) is already approved!"
+            )
+            return
+        
+        # Approve user
+        user_info['approved'] = True
+        db.save_user(target_user_id, user_info)
+        
+        # Update admin message
+        await query.edit_message_text(
+            f"""✅ **User Approved Successfully!**
+
+👤 **Name:** {user_info['name']}
+🆔 **User ID:** {target_user_id}
+📧 **Email:** {user_info.get('email', 'N/A')}
+📱 **Phone:** {user_info.get('phone', 'N/A')}
+
+The user has been notified and can now access the bot.""",
+            parse_mode='Markdown'
+        )
+        
+        # Send main menu directly to user
+        menu_text = f"""🎉 **Great news, {user_info['name']}!** 🎉
+
+Your account has been approved. Welcome to Nova Capital Wealth Trading Bot!
+
+💰 **Available Balance:** ${user_info.get('balance', 0):.2f}
+📈 **Deposit:** ${user_info.get('deposit', 0):.2f}
+📊 **Profit:** ${user_info.get('profit', 0):.2f}
+📉 **Withdrawal:** ${user_info.get('withdrawal', 0):.2f}"""
+        
+        keyboard = [
+            [InlineKeyboardButton("💳 Deposit", callback_data='deposit'),
+             InlineKeyboardButton("💸 Withdraw", callback_data='withdraw')],
+            [InlineKeyboardButton("🤖 Trading Bot", callback_data='trading_bot'),
+             InlineKeyboardButton("🎯 Stake", callback_data='stake')],
+            [InlineKeyboardButton("🔄 Refresh Balance", callback_data='refresh_balance'),
+             InlineKeyboardButton("🌐 Visit Website", callback_data='visit_website')],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=target_user_id,
+                text=menu_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+            # mark user as in the main menu conversation
+            user_data_store = context.application.dispatcher.user_data
+            user_store = user_data_store.setdefault(target_user_id, {})
+            user_store['conversation_state'] = 'MAIN_MENU'
+            user_store['_in_conversation'] = True
+            logger.info(f"Sent approval notification and main menu to user {target_user_id}")
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {target_user_id} of approval: {e}")
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=f"⚠️ User approved but failed to send notification: {e}"
+            )
+        
+    except (ValueError, IndexError) as e:
+        logger.error(f"Error approving pending user: {e}")
+        await query.edit_message_text("❌ Invalid user selection.")
+    
+async def show_pending_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show list of pending users for approval"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    admin_id = int(context.bot_data.get('admin_id', 0))
+    
+    if not admin_id or user_id != admin_id:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Unauthorized access."
+        )
+        return
+    
+    from database import db
+    user_data = db.get_all_users()
+    
+    # Filter pending users
+    pending_users = {uid: data for uid, data in user_data.items() if not data.get('approved', False)}
+    
+    if not pending_users:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="✅ No pending users to approve. All users are already approved!"
+        )
+        return
+    
+    # Create buttons for each pending user
+    keyboard = []
+    for uid, data in pending_users.items():
+        user_display = f"{data.get('name', 'N/A')} - ID: {uid}"
+        keyboard.append([InlineKeyboardButton(
+            f"👤 {user_display}", 
+            callback_data=f'approve_pending_user_{uid}'
+        )])
+    
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel_admin_action')])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="👥 **Pending Users**\n\nSelect a user to approve:",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
 
 async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle admin panel button actions"""
@@ -57,33 +203,36 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     action = query.data
     
     if action == 'admin_list_users':
+        from database import db
+        user_data = db.get_all_users()
+        
         if not user_data:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="📝 No users registered yet."
+                text="📭 No users registered yet."
             )
             return
         
         users_list = """👥 **Registered Users** 👥\n\n"""
         for uid, data in user_data.items():
-            status = "✅ Approved" if data['approved'] else "⏳ Pending"
-            bot = data['active_bot'] if data['active_bot'] else "None"
-            pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
-            pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+            status = "✅ Approved" if data.get('approved', False) else "⏳ Pending"
+            bot = data.get('active_bot', 'None') if data.get('active_bot') else "None"
+            pending_dep = f"${data.get('pending_deposit', 0):.2f}" if data.get('pending_deposit', 0) > 0 else "None"
+            pending_with = f"${data.get('pending_withdrawal', 0):.2f}" if data.get('pending_withdrawal', 0) > 0 else "None"
             
             users_list += (
-                f"🆔 **{uid}** - {data['name']}\n"
-                f"📧 {data['email']}\n"
-                f"📱 {data['phone']}\n"
-                f"💰 Balance: ${data['balance']:.2f}\n"
-                f"📈 Deposit: ${data['deposit']:.2f}\n"
-                f"📊 Profit: ${data['profit']:.2f}\n"
-                f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+                f"🆔 **{uid}** - {data.get('name', 'N/A')}\n"
+                f"📧 {data.get('email', 'N/A')}\n"
+                f"📱 {data.get('phone', 'N/A')}\n"
+                f"💰 Balance: ${data.get('balance', 0):.2f}\n"
+                f"📈 Deposit: ${data.get('deposit', 0):.2f}\n"
+                f"📊 Profit: ${data.get('profit', 0):.2f}\n"
+                f"📉 Withdrawal: ${data.get('withdrawal', 0):.2f}\n"
                 f"📊 Status: {status}\n"
                 f"🤖 Active Bot: {bot}\n"
                 f"💳 Pending Deposit: {pending_dep}\n"
                 f"💸 Pending Withdrawal: {pending_with}\n"
-                "━━━━━━━━━━━━━━━━━━━━\n"
+                "━━━━━━━━━━━━━━━━━━━\n"
             )
         
         if len(users_list) > 4000:
@@ -101,6 +250,10 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
                 parse_mode='Markdown'
             )
     
+    
+    elif action == 'admin_approve_user':  # NEW CASE
+        await show_pending_users(update, context)
+
     elif action == 'admin_approve_deposit':
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -173,15 +326,19 @@ async def approve_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         target_user_id = int(args[0])
         amount = float(args[1])
         
-        if target_user_id not in user_data:
+        from database import db
+        user_info = db.get_user(target_user_id)
+        
+        if not user_info:
             logger.error(f"User {target_user_id} not found for deposit approval")
             await update.message.reply_text(f"❌ User {target_user_id} not found. Use /listusers to see registered users.")
             return
         
-        user_info = user_data[target_user_id]
-        user_info['balance'] += amount
-        user_info['deposit'] += amount
+        user_info['balance'] = user_info.get('balance', 0) + amount
+        user_info['deposit'] = user_info.get('deposit', 0) + amount
         user_info['pending_deposit'] = 0
+        
+        db.save_user(target_user_id, user_info)
         
         try:
             await context.bot.send_message(
@@ -216,19 +373,22 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
         target_user_id = int(args[0])
         amount = float(args[1])
         
-        if target_user_id not in user_data:
+        from database import db
+        user_info = db.get_user(target_user_id)
+        
+        if not user_info:
             await update.message.reply_text(f"❌ User {target_user_id} not found. Use /listusers to see registered users.")
             return
         
-        user_info = user_data[target_user_id]
-        
-        if amount > user_info['balance']:
+        if amount > user_info.get('balance', 0):
             await update.message.reply_text("❌ Insufficient user balance.")
             return
         
-        user_info['balance'] -= amount
-        user_info['withdrawal'] += amount
+        user_info['balance'] = user_info.get('balance', 0) - amount
+        user_info['withdrawal'] = user_info.get('withdrawal', 0) + amount
         user_info['pending_withdrawal'] = 0
+        
+        db.save_user(target_user_id, user_info)
         
         try:
             await context.bot.send_message(
@@ -262,13 +422,17 @@ async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         target_user_id = int(args[0])
         amount = float(args[1])
         
-        if target_user_id not in user_data:
+        from database import db
+        user_info = db.get_user(target_user_id)
+        
+        if not user_info:
             await update.message.reply_text(f"❌ User {target_user_id} not found. Use /listusers to see registered users.")
             return
         
-        user_info = user_data[target_user_id]
-        user_info['profit'] += amount
-        user_info['balance'] += amount
+        user_info['profit'] = user_info.get('profit', 0) + amount
+        user_info['balance'] = user_info.get('balance', 0) + amount
+        
+        db.save_user(target_user_id, user_info)
         
         try:
             await context.bot.send_message(
@@ -302,13 +466,16 @@ async def update_crypto_address(update: Update, context: ContextTypes.DEFAULT_TY
         crypto_name = args[0].title()
         address = args[1]
         
+        from database import db
+        crypto_addresses = db.get_all_crypto_addresses()
+        
         if crypto_name not in crypto_addresses:
             await update.message.reply_text(
                 f"❌ Crypto {crypto_name} not found. Available: {', '.join(crypto_addresses.keys())}"
             )
             return
         
-        crypto_addresses[crypto_name] = address
+        db.update_crypto_address(crypto_name, address)
         await update.message.reply_text(f"✅ Updated {crypto_name} address to: {address}")
     
     except IndexError:
@@ -333,16 +500,18 @@ async def send_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         username = args[1]
         password = args[2]
         
-        if target_user_id not in user_data:
+        from database import db
+        user_info = db.get_user(target_user_id)
+        
+        if not user_info:
             await update.message.reply_text(f"❌ User {target_user_id} not found. Use /listusers to see registered users.")
             return
         
-        user_info = user_data[target_user_id]
         login_message = f"""🌐 **Your Website Login Details**
 
-👤 **Name:** {user_info['name']}
+👤 **Name:** {user_info.get('name', 'N/A')}
 🆔 **User ID:** {target_user_id}
-📧 **Email:** {user_info['email']}
+📧 **Email:** {user_info.get('email', 'N/A')}
 🔐 **Username:** {username}
 🔑 **Password:** {password}
 
@@ -372,30 +541,33 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("❌ Unauthorized access.")
         return
     
+    from database import db
+    user_data = db.get_all_users()
+    
     if not user_data:
-        await update.message.reply_text("📝 No users registered yet.")
+        await update.message.reply_text("📭 No users registered yet.")
         return
     
     users_list = """👥 **Registered Users** 👥\n\n"""
     for uid, data in user_data.items():
-        status = "✅ Approved" if data['approved'] else "⏳ Pending"
-        bot = data['active_bot'] if data['active_bot'] else "None"
-        pending_dep = f"${data['pending_deposit']:.2f}" if data['pending_deposit'] > 0 else "None"
-        pending_with = f"${data['pending_withdrawal']:.2f}" if data['pending_withdrawal'] > 0 else "None"
+        status = "✅ Approved" if data.get('approved', False) else "⏳ Pending"
+        bot = data.get('active_bot', 'None') if data.get('active_bot') else "None"
+        pending_dep = f"${data.get('pending_deposit', 0):.2f}" if data.get('pending_deposit', 0) > 0 else "None"
+        pending_with = f"${data.get('pending_withdrawal', 0):.2f}" if data.get('pending_withdrawal', 0) > 0 else "None"
         
         users_list += (
-            f"🆔 **{uid}** - {data['name']}\n"
-            f"📧 {data['email']}\n"
-            f"📱 {data['phone']}\n"
-            f"💰 Balance: ${data['balance']:.2f}\n"
-            f"📈 Deposit: ${data['deposit']:.2f}\n"
-            f"📊 Profit: ${data['profit']:.2f}\n"
-            f"📉 Withdrawal: ${data['withdrawal']:.2f}\n"
+            f"🆔 **{uid}** - {data.get('name', 'N/A')}\n"
+            f"📧 {data.get('email', 'N/A')}\n"
+            f"📱 {data.get('phone', 'N/A')}\n"
+            f"💰 Balance: ${data.get('balance', 0):.2f}\n"
+            f"📈 Deposit: ${data.get('deposit', 0):.2f}\n"
+            f"📊 Profit: ${data.get('profit', 0):.2f}\n"
+            f"📉 Withdrawal: ${data.get('withdrawal', 0):.2f}\n"
             f"📊 Status: {status}\n"
             f"🤖 Active Bot: {bot}\n"
             f"💳 Pending Deposit: {pending_dep}\n"
             f"💸 Pending Withdrawal: {pending_with}\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
         )
     
     if len(users_list) > 4000:
@@ -445,6 +617,7 @@ async def send_admin_panel(context: ContextTypes.DEFAULT_TYPE) -> None:
 Welcome to the admin control center. Manage users, transactions, and system settings below."""
     keyboard = [
         [InlineKeyboardButton("👥 List Users", callback_data='admin_list_users')],
+        [InlineKeyboardButton("✅ Approve User", callback_data='admin_approve_user')],  # NEW
         [InlineKeyboardButton("💳 Approve Deposit", callback_data='admin_approve_deposit')],
         [InlineKeyboardButton("💸 Approve Withdrawal", callback_data='admin_approve_withdrawal')],
         [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
