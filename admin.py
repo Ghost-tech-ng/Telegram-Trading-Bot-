@@ -28,9 +28,10 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 Welcome to the admin control center. Manage users, transactions, and system settings below."""
     keyboard = [
         [InlineKeyboardButton("👥 List Users", callback_data='admin_list_users')],
-        [InlineKeyboardButton("✅ Approve User", callback_data='admin_approve_user')],  # NEW LINE
+        [InlineKeyboardButton("✅ Approve User", callback_data='admin_approve_user')],
         [InlineKeyboardButton("💳 Approve Deposit", callback_data='admin_approve_deposit')],
         [InlineKeyboardButton("💸 Approve Withdrawal", callback_data='admin_approve_withdrawal')],
+        [InlineKeyboardButton("❌ Reject Withdrawal", callback_data='admin_reject_withdrawal')],
         [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
         [InlineKeyboardButton("🪙 Update Crypto Address", callback_data='admin_update_crypto')],
         [InlineKeyboardButton("📩 Send Login Details", callback_data='admin_send_login')],
@@ -265,6 +266,13 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="Please enter: /approvewithdrawal <user_id> <amount>",
+            reply_markup=create_cancel_keyboard()
+        )
+    
+    elif action == 'admin_reject_withdrawal':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please enter: /rejectwithdrawal <user_id> <amount>",
             reply_markup=create_cancel_keyboard()
         )
     
@@ -662,9 +670,10 @@ async def send_admin_panel(context: ContextTypes.DEFAULT_TYPE) -> None:
 Welcome to the admin control center. Manage users, transactions, and system settings below."""
     keyboard = [
         [InlineKeyboardButton("👥 List Users", callback_data='admin_list_users')],
-        [InlineKeyboardButton("✅ Approve User", callback_data='admin_approve_user')],  # NEW
+        [InlineKeyboardButton("✅ Approve User", callback_data='admin_approve_user')],
         [InlineKeyboardButton("💳 Approve Deposit", callback_data='admin_approve_deposit')],
         [InlineKeyboardButton("💸 Approve Withdrawal", callback_data='admin_approve_withdrawal')],
+        [InlineKeyboardButton("❌ Reject Withdrawal", callback_data='admin_reject_withdrawal')],
         [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
         [InlineKeyboardButton("🪙 Update Crypto Address", callback_data='admin_update_crypto')],
         [InlineKeyboardButton("📩 Send Login Details", callback_data='admin_send_login')],
