@@ -297,6 +297,7 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available commands:
 👥 /listusers - List all registered users
 💳 /approve <user_id> <amount> - Approve a deposit
 💸 /approvewithdrawal <user_id> <amount> - Approve a withdrawal
+❌ /rejectwithdrawal <user_id> <amount> - Reject a withdrawal
 📈 /updateprofit <user_id> <amount> - Update user's profit
 🪙 /updatecrypto <crypto> <address> - Update crypto address
 📩 /sendlogin <user_id> <username> <password> - Send login details to user
@@ -403,6 +404,50 @@ async def approve_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     except (ValueError, IndexError):
         await update.message.reply_text("❌ Invalid format. Usage: /approvewithdrawal <user_id> <amount>")
+
+async def reject_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to reject withdrawals"""
+    user_id = update.effective_user.id
+    admin_id = int(context.bot_data.get('admin_id', 0))
+    
+    if not admin_id or user_id != admin_id:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /rejectwithdrawal <user_id> <amount>")
+            return
+        
+        target_user_id = int(args[0])
+        amount = float(args[1])
+        
+        from database import db
+        user_info = db.get_user(target_user_id)
+        
+        if not user_info:
+            await update.message.reply_text(f"❌ User {target_user_id} not found. Use /listusers to see registered users.")
+            return
+        
+        # Clear pending withdrawal without changing balance
+        user_info['pending_withdrawal'] = 0
+        
+        db.save_user(target_user_id, user_info)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=target_user_id,
+                text=f"❌ Your withdrawal request of ${amount:.2f} has been rejected by the admin. Please contact support for more information.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {target_user_id}: {e}")
+        
+        await update.message.reply_text(f"❌ Rejected ${amount:.2f} withdrawal for user {target_user_id}.")
+    
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Invalid format. Usage: /rejectwithdrawal <user_id> <amount>")
 
 async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to update user profits"""

@@ -1002,7 +1002,8 @@ async def get_crypto_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
 Click 'Approve' to confirm this withdrawal."""
     
     keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}')]
+        [InlineKeyboardButton("✅ Approve", callback_data=f'approve_withdrawal_{user_id}_{amount}'),
+         InlineKeyboardButton("❌ Reject", callback_data=f'reject_withdrawal_{user_id}_{amount}')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -1096,6 +1097,68 @@ async def approve_withdrawal_button(update: Update, context: ContextTypes.DEFAUL
             
         await query.edit_message_text(
             f"{query.message.text}\n\n✅ **Withdrawal Approved** - ${amount:.2f} deducted from user {user_id}'s balance."
+        )
+        return MAIN_MENU
+        
+    except ValueError:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Invalid format."
+        )
+        return MAIN_MENU
+
+async def reject_withdrawal_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle admin's withdrawal rejection via button"""
+    query = update.callback_query
+    await query.answer()
+    
+    admin_id = get_admin_id()
+    if update.effective_user.id != admin_id:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Unauthorized access."
+        )
+        return MAIN_MENU
+        
+    try:
+        _, user_id_str, amount_str = query.data.split('_')
+        user_id = int(user_id_str)
+        amount = float(amount_str)
+        
+        user_info = get_user_data(user_id)
+        if not user_info or not user_info.get('name'):
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ User not found."
+            )
+            return MAIN_MENU
+        
+        # CHECK: Prevent double rejection
+        if user_info.get('pending_withdrawal', 0) == 0:
+            await query.edit_message_text(
+                f"{query.message.text}\n\n⚠️ **Already Processed** - This withdrawal has already been processed."
+            )
+            logger.warning(f"Attempted double rejection of withdrawal for user {user_id}")
+            return MAIN_MENU
+            
+        # Clear pending withdrawal without changing balance
+        user_info['pending_withdrawal'] = 0
+        
+        from database import db
+        db.save_user(user_id, user_info)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"❌ Your withdrawal request of ${amount:.2f} has been rejected by the admin. Please contact support for more information.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+            )
+            logger.info(f"Notified user {user_id} of withdrawal rejection for ${amount:.2f}")
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {user_id}: {e}")
+            
+        await query.edit_message_text(
+            f"{query.message.text}\n\n❌ **Withdrawal Rejected** - User {user_id}'s withdrawal request for ${amount:.2f} has been rejected."
         )
         return MAIN_MENU
         
@@ -1427,7 +1490,7 @@ def main() -> None:
     
     from admin import (
         send_admin_panel, admin_panel, handle_admin_action,
-        approve_deposit, approve_withdrawal, update_profit,
+        approve_deposit, approve_withdrawal, reject_withdrawal, update_profit,
         update_crypto_address, list_users, admin_help, send_login,
         approve_pending_user, cancel_admin_action
     )
@@ -1446,6 +1509,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(handle_admin_action, pattern='^admin_'))
     application.add_handler(CallbackQueryHandler(handle_deposit_confirmation, pattern='^confirm_deposit_'))
     application.add_handler(CallbackQueryHandler(approve_withdrawal_button, pattern='^approve_withdrawal_'))
+    application.add_handler(CallbackQueryHandler(reject_withdrawal_button, pattern='^reject_withdrawal_'))
     
     # CONVERSATION HANDLER - This should be registered AFTER admin handlers but BEFORE other handlers
     conv_handler = ConversationHandler(
@@ -1546,6 +1610,7 @@ def main() -> None:
     application.add_handler(CommandHandler("adminpanel", admin_panel))
     application.add_handler(CommandHandler("approve", approve_deposit))
     application.add_handler(CommandHandler("approvewithdrawal", approve_withdrawal))
+    application.add_handler(CommandHandler("rejectwithdrawal", reject_withdrawal))
     application.add_handler(CommandHandler("updateprofit", update_profit))
     application.add_handler(CommandHandler("updatecrypto", update_crypto_address))
     application.add_handler(CommandHandler("listusers", list_users))
