@@ -372,9 +372,15 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return ConversationHandler.END
     
+    # Available = total balance minus locked stake funds
+    locked = user_info.get('locked_stake_balance', 0.0)
+    available = user_info['balance'] - locked
+    if available < 0:
+        available = 0.0
+    
     menu_text = f"""🎉 **Welcome, {user_info['name']}!** 🎉
 
-💰 **Available Balance:** ${user_info['balance']:.2f}
+💰 **Available Balance:** ${available:.2f}
 📈 **Deposit:** ${user_info['deposit']:.2f}
 📊 **Profit:** ${user_info['profit']:.2f}
 📉 **Withdrawal:** ${user_info['withdrawal']:.2f}"""
@@ -1329,6 +1335,10 @@ async def handle_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     user_info = get_user_data(user_id)
     staked_balance = user_info.get('staked_balance', 0.0)
     locked_balance = user_info.get('locked_stake_balance', 0.0)
+    total_balance = user_info.get('balance', 0.0)
+    available = total_balance - locked_balance
+    if available < 0:
+        available = 0.0
     
     keyboard = []
     
@@ -1338,7 +1348,8 @@ async def handle_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     if staked_balance <= 0 and locked_balance <= 0:
         message = """🎯 **Staking Dashboard**
 
-💰 **Staking Balance:** $0.00
+💰 **Available Balance:** $0.00
+🎯 **Staking Balance:** $0.00
 🔒 **Locked Stake:** $0.00
 
 You haven't started staking yet! Deposit funds to your staking balance to start earning rewards.
@@ -1350,14 +1361,16 @@ You haven't started staking yet! Deposit funds to your staking balance to start 
     elif staked_balance <= 0:
         message = f"""🎯 **Staking Dashboard**
 
-💰 **Staking Balance:** $0.00
+💰 **Available Balance:** ${available:.2f}
+🎯 **Staking Balance:** $0.00
 🔒 **Locked Stake:** ${locked_balance:.2f}
 
 All your staking funds are currently locked. Deposit more to start a new stake."""
     else:
         message = f"""🎯 **Staking Dashboard**
 
-💰 **Staking Balance:** ${staked_balance:.2f}
+💰 **Available Balance:** ${available:.2f}
+🎯 **Staking Balance:** ${staked_balance:.2f}
 🔒 **Locked Stake:** ${locked_balance:.2f}
 
 Manage your active stakes or start a new one."""
