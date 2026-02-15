@@ -377,10 +377,13 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     available = user_info['balance'] - locked
     if available < 0:
         available = 0.0
+    staking_bal = user_info.get('staked_balance', 0.0)
     
     menu_text = f"""🎉 **Welcome, {user_info['name']}!** 🎉
 
 💰 **Available Balance:** ${available:.2f}
+🎯 **Staking Balance:** ${staking_bal:.2f}
+🔒 **Locked Stake:** ${locked:.2f}
 📈 **Deposit:** ${user_info['deposit']:.2f}
 📊 **Profit:** ${user_info['profit']:.2f}
 📉 **Withdrawal:** ${user_info['withdrawal']:.2f}"""
