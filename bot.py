@@ -1328,37 +1328,27 @@ async def handle_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     
     user_info = get_user_data(user_id)
     staked_balance = user_info.get('staked_balance', 0.0)
-    balance = user_info.get('balance', 0.0)
     
     keyboard = []
     
     # Always show deposit option
     keyboard.append([InlineKeyboardButton("💳 Deposit to Stake", callback_data='stake_deposit')])
     
-    if staked_balance <= 0 and balance <= 0:
+    if staked_balance <= 0:
         message = """🎯 **Staking Dashboard**
 
 💰 **Staked Balance:** $0.00
 
-You haven't started staking yet! Deposit funds to start earning rewards through our secure staking program.
+You haven't started staking yet! Deposit funds to your staking balance to start earning rewards.
 
 🚀 **Why Stake?**
 • Earn passive income
 • Flexible & Fixed options
 • Top-tier security"""
-    elif staked_balance <= 0 and balance > 0:
-        message = f"""🎯 **Staking Dashboard**
-
-💰 **Staked Balance:** $0.00
-💵 **Available Balance:** ${balance:.2f}
-
-You have funds available! Start staking to earn rewards."""
-        keyboard.append([InlineKeyboardButton("🚀 Start New Stake", callback_data='start_staking')])
     else:
         message = f"""🎯 **Staking Dashboard**
 
 💰 **Staked Balance:** ${staked_balance:.2f}
-💵 **Available Balance:** ${balance:.2f}
 
 Manage your active stakes or start a new one."""
         keyboard.append([InlineKeyboardButton("🚀 Start New Stake", callback_data='start_staking')])
@@ -1410,12 +1400,12 @@ async def start_staking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     
     user_id = update.effective_user.id
     user_info = get_user_data(user_id)
-    balance = user_info.get('balance', 0.0)
+    staked_balance = user_info.get('staked_balance', 0.0)
     
-    if balance <= 0:
+    if staked_balance <= 0:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="⚠️ **No Funds Available**\n\nYou need to deposit funds first before you can stake.\n\nUse 'Deposit to Stake' to add funds.",
+            text="⚠️ **Insufficient Staking Balance**\n\nYou need to deposit funds to your staking balance first.\n\nUse 'Deposit to Stake' to add funds.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💳 Deposit to Stake", callback_data='stake_deposit')],
                 [InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]
@@ -1439,7 +1429,7 @@ async def start_staking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=f"💎 **Select Asset to Stake**\n\n💵 Available Balance: ${balance:.2f}\n\nChoose from our premium selection of supported cryptocurrencies:",
+        text=f"💎 **Select Asset to Stake**\n\n🎯 Staking Balance: ${staked_balance:.2f}\n\nChoose from our premium selection of supported cryptocurrencies:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -1455,11 +1445,11 @@ async def select_staking_coin(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     user_id = update.effective_user.id
     user_info = get_user_data(user_id)
-    balance = user_info.get('balance', 0.0)
+    staked_balance = user_info.get('staked_balance', 0.0)
     
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=f"💰 **Enter Staking Amount for {coin}**\n\n💵 Available Balance: ${balance:.2f}\n\nEnter the amount you want to stake (in USD):",
+        text=f"💰 **Enter Staking Amount for {coin}**\n\n🎯 Staking Balance: ${staked_balance:.2f}\n\nEnter the amount you want to stake (in USD):",
         reply_markup=create_cancel_keyboard(),
         parse_mode='Markdown'
     )
@@ -1475,11 +1465,11 @@ async def get_staking_amount(update: Update, context: ContextTypes.DEFAULT_TYPE)
             raise ValueError("Amount must be positive")
             
         user_info = get_user_data(user_id)
-        current_balance = user_info.get('balance', 0.0)
+        staked_balance = user_info.get('staked_balance', 0.0)
         
-        if amount > current_balance:
+        if amount > staked_balance:
             await update.message.reply_text(
-                f"⚠️ **Insufficient Funds**\n\nAvailable Balance: ${current_balance:.2f}\nRequired: ${amount:.2f}\n\nPlease deposit more funds first.",
+                f"⚠️ **Insufficient Staking Balance**\n\n🎯 Staking Balance: ${staked_balance:.2f}\nRequired: ${amount:.2f}\n\nPlease deposit more funds to your staking balance.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("💳 Deposit to Stake", callback_data='stake_deposit')],
                     [InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]
@@ -1578,21 +1568,20 @@ async def finalize_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     plan = context.user_data.get('staking_plan', 'flexible')
     duration = context.user_data.get('staking_duration', 'Flexible')
     
-    current_balance = user_info.get('balance', 0.0)
+    staked_balance = user_info.get('staked_balance', 0.0)
     
-    # Final balance check
-    if amount > current_balance:
+    # Final staking balance check
+    if amount > staked_balance:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=f"⚠️ **Insufficient Funds**\n\nAvailable Balance: ${current_balance:.2f}\nRequired: ${amount:.2f}",
+            text=f"⚠️ **Insufficient Staking Balance**\n\n🎯 Staking Balance: ${staked_balance:.2f}\nRequired: ${amount:.2f}",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]]),
             parse_mode='Markdown'
         )
         return MAIN_MENU
     
-    # Execute Stake - move funds from balance to staked_balance
-    user_info['balance'] -= amount
-    user_info['staked_balance'] = user_info.get('staked_balance', 0.0) + amount
+    # Execute Stake - deduct from staked_balance (lock the funds)
+    user_info['staked_balance'] = staked_balance - amount
     
     new_stake = {
         'coin': coin,
