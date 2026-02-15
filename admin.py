@@ -714,7 +714,9 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available commands:
 👥 /listusers - List all registered users
 💳 /approve <user_id> <amount> - Approve a deposit
 💸 /approvewithdrawal <user_id> <amount> - Approve a withdrawal
+❌ /rejectwithdrawal <user_id> <amount> - Reject a withdrawal
 📈 /updateprofit <user_id> <amount> - Update user's profit
+💎 /updatestake <user_id> <amount> - Update user's staked balance
 🪙 /updatecrypto <crypto> <address> - Update crypto address
 📩 /sendlogin <user_id> <username> <password> - Send login details to user
 ℹ️ /adminhelp - Show this help message"""

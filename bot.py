@@ -688,7 +688,12 @@ async def get_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     context.user_data.pop('awaiting_deposit_proof', None)
     context.user_data['deposit_message_id'] = update.message.message_id if update.message else None
     
-    admin_message = f"""💳 **New Deposit Request**
+    # Check if this is a staking deposit
+    is_staking = context.user_data.get('deposit_purpose') == 'staking'
+    purpose_text = "🎯 **Staking Deposit**" if is_staking else "💳 **New Deposit Request**"
+    purpose_tag = "_staking" if is_staking else ""
+    
+    admin_message = f"""{purpose_text}
 
 👤 **User:** {user_info['name']} (ID: {user_id})
 💰 **Amount:** ${amount:.2f}
@@ -699,7 +704,7 @@ async def get_deposit_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 Click 'Approve' to confirm this deposit."""
     
     keyboard = [
-        [InlineKeyboardButton("✅ Approve", callback_data=f'confirm_deposit_{user_id}_{amount}')]
+        [InlineKeyboardButton("✅ Approve", callback_data=f'confirm_deposit_{user_id}_{amount}{purpose_tag}')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -757,7 +762,12 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
         
     try:
         logger.info(f"Processing deposit confirmation with callback data: {query.data}")
-        parts = query.data.split('_')
+        
+        # Check if this is a staking deposit and strip the suffix for parsing
+        is_staking = '_staking' in query.data
+        parse_data = query.data.replace('_staking', '') if is_staking else query.data
+        
+        parts = parse_data.split('_')
         if len(parts) < 3:
             raise ValueError("Invalid callback data format")
         target_user_id = int(parts[-2])
@@ -780,27 +790,38 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
             logger.warning(f"Attempted double approval of deposit for user {target_user_id}")
             return MAIN_MENU
             
+        # Check if this is a staking deposit
+        is_staking = '_staking' in query.data
+        
         user_info['balance'] += amount
         user_info['deposit'] += amount
+        if is_staking:
+            user_info['staked_balance'] = user_info.get('staked_balance', 0.0) + amount
         user_info['pending_deposit'] = 0
         
         from database import db
         db.save_user(target_user_id, user_info)
         
-        logger.info(f"Approved deposit of ${amount:.2f} for user {target_user_id}. New balance: ${user_info['balance']:.2f}")
+        if is_staking:
+            logger.info(f"Approved STAKING deposit of ${amount:.2f} for user {target_user_id}. Balance: ${user_info['balance']:.2f}, Staked: ${user_info.get('staked_balance', 0):.2f}")
+            notify_text = f"✅ Your staking deposit of ${amount:.2f} has been confirmed!\n\n💰 Balance: ${user_info['balance']:.2f}\n🎯 Staked Balance: ${user_info.get('staked_balance', 0):.2f}"
+        else:
+            logger.info(f"Approved deposit of ${amount:.2f} for user {target_user_id}. New balance: ${user_info['balance']:.2f}")
+            notify_text = f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
         
         try:
             await context.bot.send_message(
                 chat_id=target_user_id,
-                text=f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}.",
+                text=notify_text,
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
             )
             logger.info(f"Notified user {target_user_id} of deposit confirmation")
         except TelegramError as e:
             logger.error(f"Failed to notify user {target_user_id} of deposit confirmation: {e}")
-            
+        
+        deposit_type = "Staking Deposit" if is_staking else "Deposit"
         await query.edit_message_text(
-            f"{query.message.text}\n\n✅ **Deposit Approved** - ${amount:.2f} added to user {target_user_id}'s balance."
+            f"{query.message.text}\n\n✅ **{deposit_type} Approved** - ${amount:.2f} added to user {target_user_id}'s balance."
         )
         logger.info(f"Updated admin message for deposit confirmation for user {target_user_id}")
         
@@ -1307,13 +1328,16 @@ async def handle_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     
     user_info = get_user_data(user_id)
     staked_balance = user_info.get('staked_balance', 0.0)
+    balance = user_info.get('balance', 0.0)
     
     keyboard = []
     
-    # If no staked balance, encourage deposit
-    if staked_balance <= 0:
+    # Always show deposit option
+    keyboard.append([InlineKeyboardButton("💳 Deposit to Stake", callback_data='stake_deposit')])
+    
+    if staked_balance <= 0 and balance <= 0:
         message = """🎯 **Staking Dashboard**
-        
+
 💰 **Staked Balance:** $0.00
 
 You haven't started staking yet! Deposit funds to start earning rewards through our secure staking program.
@@ -1322,16 +1346,23 @@ You haven't started staking yet! Deposit funds to start earning rewards through 
 • Earn passive income
 • Flexible & Fixed options
 • Top-tier security"""
-        keyboard.append([InlineKeyboardButton("💳 Deposit to Stake", callback_data='stake_deposit')])
+    elif staked_balance <= 0 and balance > 0:
+        message = f"""🎯 **Staking Dashboard**
+
+💰 **Staked Balance:** $0.00
+💵 **Available Balance:** ${balance:.2f}
+
+You have funds available! Start staking to earn rewards."""
+        keyboard.append([InlineKeyboardButton("🚀 Start New Stake", callback_data='start_staking')])
     else:
         message = f"""🎯 **Staking Dashboard**
-        
-💰 **Staked Balance:** ${staked_balance:.2f}
 
-Manage your active stakes or add more funds to increase your earnings."""
-        keyboard.append([InlineKeyboardButton("💳 Add to Stake", callback_data='stake_deposit')])
-        
-    keyboard.append([InlineKeyboardButton("🚀 Start New Stake", callback_data='start_staking')])
+💰 **Staked Balance:** ${staked_balance:.2f}
+💵 **Available Balance:** ${balance:.2f}
+
+Manage your active stakes or start a new one."""
+        keyboard.append([InlineKeyboardButton("🚀 Start New Stake", callback_data='start_staking')])
+    
     keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1350,10 +1381,48 @@ STAKING_COINS = [
     'ADA', 'AVAX', 'DOGE', 'DOT', 'TRX', 'LINK'
 ]
 
-async def start_staking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start staking flow - Select Coin"""
+async def stake_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle deposit specifically for staking - uses normal deposit flow but tagged"""
     query = update.callback_query
     await query.answer()
+    
+    # Tag this deposit as staking so admin and confirmation know
+    context.user_data['deposit_purpose'] = 'staking'
+    
+    keyboard = [
+        [InlineKeyboardButton("₿ Crypto", callback_data='deposit_crypto')],
+        [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="🎯 **Deposit to Stake**\n\nChoose your preferred deposit method:",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    return MAIN_MENU
+
+async def start_staking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start staking flow - check balance first, then show coins"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    user_info = get_user_data(user_id)
+    balance = user_info.get('balance', 0.0)
+    
+    if balance <= 0:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="⚠️ **No Funds Available**\n\nYou need to deposit funds first before you can stake.\n\nUse 'Deposit to Stake' to add funds.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💳 Deposit to Stake", callback_data='stake_deposit')],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]
+            ]),
+            parse_mode='Markdown'
+        )
+        return MAIN_MENU
     
     keyboard = []
     row = []
@@ -1370,99 +1439,34 @@ async def start_staking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="💎 **Select Asset to Stake**\n\nChoose from our premium selection of supported cryptocurrencies:",
+        text=f"💎 **Select Asset to Stake**\n\n💵 Available Balance: ${balance:.2f}\n\nChoose from our premium selection of supported cryptocurrencies:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
     return MAIN_MENU
 
 async def select_staking_coin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle coin selection and show plans"""
+    """Handle coin selection - ask for amount next"""
     query = update.callback_query
     await query.answer()
     
     coin = query.data.split('_')[-1]
     context.user_data['staking_coin'] = coin
     
-    keyboard = [
-        [InlineKeyboardButton("🔓 Flexible Staking", callback_data='stake_plan_flexible')],
-        [InlineKeyboardButton("🔒 Fixed Staking (Higher APY)", callback_data='stake_plan_fixed')],
-        [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    user_id = update.effective_user.id
+    user_info = get_user_data(user_id)
+    balance = user_info.get('balance', 0.0)
     
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=f"""💎 **Staking {coin}**
-
-Select your preferred staking plan:
-
-**🔓 Flexible Staking**
-• Withdraw anytime
-• Standard rewards
-• Low risk
-
-**🔒 Fixed Staking**
-• Locked for duration
-• **Premium rewards** (Higher APY)
-• Maximize returns""",
-        reply_markup=reply_markup,
-        parse_mode='Markdown'
-    )
-    return MAIN_MENU
-
-async def select_staking_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle plan selection and ask for amount"""
-    query = update.callback_query
-    await query.answer()
-    
-    plan_type = query.data.split('_')[-1] # flexible or fixed
-    context.user_data['staking_plan'] = plan_type
-    
-    if plan_type == 'fixed':
-        keyboard = [
-            [InlineKeyboardButton("30 Days", callback_data='stake_duration_30')],
-            [InlineKeyboardButton("60 Days", callback_data='stake_duration_60')],
-            [InlineKeyboardButton("90 Days", callback_data='stake_duration_90')],
-            [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="⏳ **Select Duration**\n\nLonger lock-up periods earn higher rewards:",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-        return MAIN_MENU
-    else:
-        # Flexible - go straight to amount
-        context.user_data['staking_duration'] = 'Flexible'
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=f"💰 **Enter Staking Amount**\n\nHow much {context.user_data['staking_coin']} would you like to stake? (Enter value in USD)",
-            reply_markup=create_cancel_keyboard(),
-            parse_mode='Markdown'
-        )
-        return STAKING_AMOUNT
-
-async def select_staking_duration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle duration selection for fixed staking"""
-    query = update.callback_query
-    await query.answer()
-    
-    duration = query.data.split('_')[-1]
-    context.user_data['staking_duration'] = f"{duration} Days"
-    
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=f"💰 **Enter Staking Amount**\n\nHow much {context.user_data['staking_coin']} would you like to stake? (Enter value in USD)",
+        text=f"💰 **Enter Staking Amount for {coin}**\n\n💵 Available Balance: ${balance:.2f}\n\nEnter the amount you want to stake (in USD):",
         reply_markup=create_cancel_keyboard(),
         parse_mode='Markdown'
     )
     return STAKING_AMOUNT
 
 async def get_staking_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Process staking amount and finalize"""
+    """Process staking amount - then ask for duration"""
     user_id = update.effective_user.id
     
     try:
@@ -1474,48 +1478,155 @@ async def get_staking_amount(update: Update, context: ContextTypes.DEFAULT_TYPE)
         current_balance = user_info.get('balance', 0.0)
         
         if amount > current_balance:
-             await update.message.reply_text(
-                f"⚠️ **Insufficient Funds**\n\nAvailable Balance: ${current_balance:.2f}\nRequired: ${amount:.2f}\n\nPlease deposit more funds to proceed.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💳 Deposit", callback_data='stake_deposit')]]),
+            await update.message.reply_text(
+                f"⚠️ **Insufficient Funds**\n\nAvailable Balance: ${current_balance:.2f}\nRequired: ${amount:.2f}\n\nPlease deposit more funds first.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("💳 Deposit to Stake", callback_data='stake_deposit')],
+                    [InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]
+                ]),
                 parse_mode='Markdown'
             )
-             return MAIN_MENU
-             
-        # Execute Stake
-        user_info['balance'] -= amount
-        user_info['staked_balance'] = user_info.get('staked_balance', 0.0) + amount
+            return MAIN_MENU
         
-        new_stake = {
-            'coin': context.user_data['staking_coin'],
-            'amount': amount,
-            'plan': context.user_data['staking_plan'],
-            'duration': context.user_data['staking_duration'],
-            'status': 'Active'
-        }
+        # Store amount and ask for duration
+        context.user_data['staking_amount'] = amount
         
-        stakes = user_info.get('active_stakes', [])
-        stakes.append(new_stake)
-        user_info['active_stakes'] = stakes
-        
-        from database import db
-        db.save_user(user_id, user_info)
+        keyboard = [
+            [InlineKeyboardButton("30 Days", callback_data='stake_duration_30')],
+            [InlineKeyboardButton("60 Days", callback_data='stake_duration_60')],
+            [InlineKeyboardButton("90 Days", callback_data='stake_duration_90')],
+            [InlineKeyboardButton("Flexible (No Lock)", callback_data='stake_duration_flex')],
+            [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
-            f"""🎉 **Staking Successful!**
-            
-💎 **Asset:** {new_stake['coin']}
-💰 **Amount Locked:** ${amount:.2f}
-📅 **Plan:** {new_stake['plan'].title()} ({new_stake['duration']})
-
-Your funds are now actively earning rewards! Check your dashboard to monitor growth.""",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]]),
+            f"⏳ **Select Staking Duration**\n\n💎 Asset: {context.user_data['staking_coin']}\n💰 Amount: ${amount:.2f}\n\nChoose how long you want to stake:",
+            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
         return MAIN_MENU
         
     except ValueError:
-        await update.message.reply_text("Please enter a valid numeric amount.")
+        await update.message.reply_text("Please enter a valid numeric amount (e.g. 100).")
         return STAKING_AMOUNT
+
+async def select_staking_duration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle duration selection - then ask for plan type (fixed/flexible)"""
+    query = update.callback_query
+    await query.answer()
+    
+    duration_raw = query.data.split('_')[-1]
+    
+    if duration_raw == 'flex':
+        context.user_data['staking_duration'] = 'Flexible'
+        # Flexible means flexible plan automatically
+        context.user_data['staking_plan'] = 'flexible'
+        # Go straight to confirmation
+        return await finalize_stake(update, context)
+    else:
+        context.user_data['staking_duration'] = f"{duration_raw} Days"
+        
+        keyboard = [
+            [InlineKeyboardButton("🔒 Fixed Staking", callback_data='stake_plan_fixed')],
+            [InlineKeyboardButton("🔓 Flexible Staking", callback_data='stake_plan_flexible')],
+            [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        coin = context.user_data.get('staking_coin', 'N/A')
+        amount = context.user_data.get('staking_amount', 0)
+        duration = context.user_data.get('staking_duration', 'N/A')
+        
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"""📋 **Select Staking Type**
+
+💎 Asset: {coin}
+💰 Amount: ${amount:.2f}
+⏳ Duration: {duration}
+
+**🔒 Fixed Staking**
+• Funds locked for the duration
+• Higher rewards
+
+**🔓 Flexible Staking**
+• Withdraw anytime
+• Standard rewards""",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        return MAIN_MENU
+
+async def select_staking_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle plan type selection and finalize the stake"""
+    query = update.callback_query
+    await query.answer()
+    
+    plan_type = query.data.split('_')[-1]  # fixed or flexible
+    context.user_data['staking_plan'] = plan_type
+    
+    return await finalize_stake(update, context)
+
+async def finalize_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Execute the stake - lock funds and save"""
+    user_id = update.effective_user.id
+    user_info = get_user_data(user_id)
+    
+    coin = context.user_data.get('staking_coin', 'N/A')
+    amount = context.user_data.get('staking_amount', 0)
+    plan = context.user_data.get('staking_plan', 'flexible')
+    duration = context.user_data.get('staking_duration', 'Flexible')
+    
+    current_balance = user_info.get('balance', 0.0)
+    
+    # Final balance check
+    if amount > current_balance:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"⚠️ **Insufficient Funds**\n\nAvailable Balance: ${current_balance:.2f}\nRequired: ${amount:.2f}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]]),
+            parse_mode='Markdown'
+        )
+        return MAIN_MENU
+    
+    # Execute Stake - move funds from balance to staked_balance
+    user_info['balance'] -= amount
+    user_info['staked_balance'] = user_info.get('staked_balance', 0.0) + amount
+    
+    new_stake = {
+        'coin': coin,
+        'amount': amount,
+        'plan': plan,
+        'duration': duration,
+        'status': 'Active'
+    }
+    
+    stakes = user_info.get('active_stakes', [])
+    stakes.append(new_stake)
+    user_info['active_stakes'] = stakes
+    
+    from database import db
+    db.save_user(user_id, user_info)
+    
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"""🎉 **Congratulations! You have successfully staked!**
+
+💎 **Asset:** {coin}
+💰 **Amount Locked:** ${amount:.2f}
+📋 **Plan:** {plan.title()}
+⏳ **Duration:** {duration}
+📊 **Status:** Active
+
+Your funds are now locked and earning rewards!""",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎯 Staking Dashboard", callback_data='stake')],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]
+        ]),
+        parse_mode='Markdown'
+    )
+    return MAIN_MENU
 
 async def visit_website(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle website visit"""
@@ -1722,7 +1833,17 @@ def main() -> None:
     
     # CONVERSATION HANDLER - This should be registered AFTER admin handlers but BEFORE other handlers
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+            CallbackQueryHandler(stake_deposit, pattern='^stake_deposit$'), # Staking entry
+            CallbackQueryHandler(start_staking, pattern='^start_staking$'), # Staking entry
+            CallbackQueryHandler(handle_stake, pattern='^stake$'), # Dashboard entry
+            # Also add main menu buttons so users can "re-enter" flow if bot restarted
+            CallbackQueryHandler(handle_deposit, pattern='^deposit$'),
+            CallbackQueryHandler(handle_withdrawal, pattern='^withdraw$'),
+            CallbackQueryHandler(show_trading_bot, pattern='^trading_bot$'),
+            CallbackQueryHandler(refresh_balance, pattern='^refresh_balance$'),
+        ],
         states={
             WAITING_NAME: [
                 CallbackQueryHandler(start_registration, pattern='^start_registration$'),
@@ -1750,7 +1871,7 @@ def main() -> None:
                 CallbackQueryHandler(show_trading_bot, pattern='^trading_bot$'),
                 CallbackQueryHandler(select_trading_bot, pattern='^select_bot_'),
                 CallbackQueryHandler(handle_stake, pattern='^stake$'),
-                CallbackQueryHandler(handle_deposit, pattern='^stake_deposit$'),
+                CallbackQueryHandler(stake_deposit, pattern='^stake_deposit$'),
                 CallbackQueryHandler(start_staking, pattern='^start_staking$'),
                 CallbackQueryHandler(select_staking_coin, pattern='^stake_coin_'),
                 CallbackQueryHandler(select_staking_plan, pattern='^stake_plan_'),
@@ -1804,6 +1925,11 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(show_trading_bot, pattern='^trading_bot$'))
     application.add_handler(CallbackQueryHandler(select_trading_bot, pattern='^select_bot_'))
     application.add_handler(CallbackQueryHandler(handle_stake, pattern='^stake$'))
+    application.add_handler(CallbackQueryHandler(stake_deposit, pattern='^stake_deposit$'))
+    application.add_handler(CallbackQueryHandler(start_staking, pattern='^start_staking$'))
+    application.add_handler(CallbackQueryHandler(select_staking_coin, pattern='^stake_coin_'))
+    application.add_handler(CallbackQueryHandler(select_staking_plan, pattern='^stake_plan_'))
+    application.add_handler(CallbackQueryHandler(select_staking_duration, pattern='^stake_duration_'))
     application.add_handler(CallbackQueryHandler(cancel_operation, pattern='^cancel$'))
     application.add_handler(CallbackQueryHandler(copy_address, pattern='^copy_address_'))
     application.add_handler(CallbackQueryHandler(payment_made, pattern='^payment_made$'))
