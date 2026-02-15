@@ -34,6 +34,7 @@ Welcome to the admin control center. Manage users, transactions, and system sett
         [InlineKeyboardButton("❌ Reject Withdrawal", callback_data='admin_reject_withdrawal')],
         [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
         [InlineKeyboardButton("💎 Update Stake Balance", callback_data='admin_update_stake')],
+        [InlineKeyboardButton("🔒 Update Locked Stake", callback_data='admin_update_locked')],
         [InlineKeyboardButton("🪙 Update Crypto Address", callback_data='admin_update_crypto')],
         [InlineKeyboardButton("📩 Send Login Details", callback_data='admin_send_login')],
         [InlineKeyboardButton("ℹ️ Help", callback_data='admin_help')]
@@ -284,10 +285,10 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=create_cancel_keyboard()
         )
         
-    elif action == 'admin_update_stake':
+    elif action == 'admin_update_locked':
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text="Please enter: /updatestake <user_id> <amount>",
+            text="Please enter: /updatelocked <user_id> <amount>",
             reply_markup=create_cancel_keyboard()
         )
     
@@ -521,6 +522,55 @@ async def update_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except ValueError:
         await update.message.reply_text("❌ Invalid format. Usage: /updatestake <user_id> <amount>")
 
+async def update_locked_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user's locked stake balance"""
+    user_id = update.effective_user.id
+    admin_id = int(context.bot_data.get('admin_id', 0))
+    
+    if not admin_id or user_id != admin_id:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatelocked <user_id> <amount>")
+            return
+        
+        target_user_id = int(args[0])
+        amount = float(args[1])
+        
+        from database import db
+        user_info = db.get_user(target_user_id)
+        
+        if not user_info:
+            await update.message.reply_text(f"❌ User {target_user_id} not found.")
+            return
+            
+        # Update locked stake balance
+        current_locked = user_info.get('locked_stake_balance', 0.0)
+        user_info['locked_stake_balance'] = current_locked + amount
+        
+        # Ensure non-negative
+        if user_info['locked_stake_balance'] < 0:
+            user_info['locked_stake_balance'] = 0.0
+            
+        db.save_user(target_user_id, user_info)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=target_user_id,
+                text=f"🔒 **Locked Stake Updated**\n\nYour locked stake balance has been updated by ${amount:.2f}.\nNew Locked Stake: ${user_info['locked_stake_balance']:.2f}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎯 Staking Dashboard", callback_data='stake')]])
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {target_user_id}: {e}")
+            
+        await update.message.reply_text(f"✅ Updated locked stake for user {target_user_id}.\nNew Locked Stake: ${user_info['locked_stake_balance']:.2f}")
+        
+    except ValueError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatelocked <user_id> <amount>")
+
 async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to update user profits"""
     user_id = update.effective_user.id
@@ -680,6 +730,8 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"📈 Deposit: ${data.get('deposit', 0):.2f}\n"
             f"📊 Profit: ${data.get('profit', 0):.2f}\n"
             f"📉 Withdrawal: ${data.get('withdrawal', 0):.2f}\n"
+            f"🎯 Staking Balance: ${data.get('staked_balance', 0):.2f}\n"
+            f"🔒 Locked Stake: ${data.get('locked_stake_balance', 0):.2f}\n"
             f"📊 Status: {status}\n"
             f"🤖 Active Bot: {bot}\n"
             f"💳 Pending Deposit: {pending_dep}\n"
@@ -716,7 +768,8 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available commands:
 💸 /approvewithdrawal <user_id> <amount> - Approve a withdrawal
 ❌ /rejectwithdrawal <user_id> <amount> - Reject a withdrawal
 📈 /updateprofit <user_id> <amount> - Update user's profit
-💎 /updatestake <user_id> <amount> - Update user's staked balance
+💎 /updatestake <user_id> <amount> - Update user's staking balance
+🔒 /updatelocked <user_id> <amount> - Update user's locked stake balance
 🪙 /updatecrypto <crypto> <address> - Update crypto address
 📩 /sendlogin <user_id> <username> <password> - Send login details to user
 ℹ️ /adminhelp - Show this help message"""
@@ -741,6 +794,8 @@ Welcome to the admin control center. Manage users, transactions, and system sett
         [InlineKeyboardButton("💸 Approve Withdrawal", callback_data='admin_approve_withdrawal')],
         [InlineKeyboardButton("❌ Reject Withdrawal", callback_data='admin_reject_withdrawal')],
         [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
+        [InlineKeyboardButton("💎 Update Stake Balance", callback_data='admin_update_stake')],
+        [InlineKeyboardButton("🔒 Update Locked Stake", callback_data='admin_update_locked')],
         [InlineKeyboardButton("🪙 Update Crypto Address", callback_data='admin_update_crypto')],
         [InlineKeyboardButton("📩 Send Login Details", callback_data='admin_send_login')],
         [InlineKeyboardButton("ℹ️ Help", callback_data='admin_help')]

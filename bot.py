@@ -1328,16 +1328,18 @@ async def handle_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     
     user_info = get_user_data(user_id)
     staked_balance = user_info.get('staked_balance', 0.0)
+    locked_balance = user_info.get('locked_stake_balance', 0.0)
     
     keyboard = []
     
     # Always show deposit option
     keyboard.append([InlineKeyboardButton("💳 Deposit to Stake", callback_data='stake_deposit')])
     
-    if staked_balance <= 0:
+    if staked_balance <= 0 and locked_balance <= 0:
         message = """🎯 **Staking Dashboard**
 
-💰 **Staked Balance:** $0.00
+💰 **Staking Balance:** $0.00
+🔒 **Locked Stake:** $0.00
 
 You haven't started staking yet! Deposit funds to your staking balance to start earning rewards.
 
@@ -1345,10 +1347,18 @@ You haven't started staking yet! Deposit funds to your staking balance to start 
 • Earn passive income
 • Flexible & Fixed options
 • Top-tier security"""
+    elif staked_balance <= 0:
+        message = f"""🎯 **Staking Dashboard**
+
+💰 **Staking Balance:** $0.00
+🔒 **Locked Stake:** ${locked_balance:.2f}
+
+All your staking funds are currently locked. Deposit more to start a new stake."""
     else:
         message = f"""🎯 **Staking Dashboard**
 
-💰 **Staked Balance:** ${staked_balance:.2f}
+💰 **Staking Balance:** ${staked_balance:.2f}
+🔒 **Locked Stake:** ${locked_balance:.2f}
 
 Manage your active stakes or start a new one."""
         keyboard.append([InlineKeyboardButton("🚀 Start New Stake", callback_data='start_staking')])
@@ -1580,8 +1590,9 @@ async def finalize_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return MAIN_MENU
     
-    # Execute Stake - deduct from staked_balance (lock the funds)
+    # Execute Stake - deduct from staked_balance and add to locked_stake_balance
     user_info['staked_balance'] = staked_balance - amount
+    user_info['locked_stake_balance'] = user_info.get('locked_stake_balance', 0.0) + amount
     
     new_stake = {
         'coin': coin,
@@ -1607,6 +1618,9 @@ async def finalize_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 📋 **Plan:** {plan.title()}
 ⏳ **Duration:** {duration}
 📊 **Status:** Active
+
+🎯 **Remaining Staking Balance:** ${user_info['staked_balance']:.2f}
+🔒 **Total Locked:** ${user_info['locked_stake_balance']:.2f}
 
 Your funds are now locked and earning rewards!""",
         reply_markup=InlineKeyboardMarkup([
@@ -1801,7 +1815,7 @@ def main() -> None:
         send_admin_panel, admin_panel, handle_admin_action,
         approve_deposit, approve_withdrawal, reject_withdrawal, update_profit,
         update_crypto_address, list_users, admin_help, send_login,
-        approve_pending_user, cancel_admin_action, update_stake
+        approve_pending_user, cancel_admin_action, update_stake, update_locked_stake
     )
     
     admin_id = get_admin_id()
@@ -1945,6 +1959,7 @@ def main() -> None:
     application.add_handler(CommandHandler("approvewithdrawal", approve_withdrawal))
     application.add_handler(CommandHandler("rejectwithdrawal", reject_withdrawal))
     application.add_handler(CommandHandler("updatestake", update_stake))
+    application.add_handler(CommandHandler("updatelocked", update_locked_stake))
     application.add_handler(CommandHandler("updateprofit", update_profit))
     application.add_handler(CommandHandler("updatecrypto", update_crypto_address))
     application.add_handler(CommandHandler("listusers", list_users))
