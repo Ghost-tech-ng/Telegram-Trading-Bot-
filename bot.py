@@ -576,7 +576,7 @@ Click "Copy Address" to automatically copy the wallet address to your clipboard.
         return DEPOSIT_AMOUNT
 
 async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Send crypto address as copyable text and attempt to trigger clipboard copy"""
+    """Send crypto address as easily copyable text"""
     user_id = update.effective_user.id
     admin_id = get_admin_id()
     
@@ -588,69 +588,21 @@ async def copy_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         return ConversationHandler.END
         
     query = update.callback_query
-    await query.answer()
     
-    crypto_name = query.data.split('_')[-1]
+    # Extract crypto name: callback is 'copy_address_CRYPTONAME'
+    crypto_name = query.data.replace('copy_address_', '')
     
     from database import db
     address = db.get_crypto_address(crypto_name)
     
-    # Send the address as plain text for manual copying
+    # Show toast popup
+    await query.answer("📋 Address sent below — tap to copy!", show_alert=False)
+    
+    # Send address as code block (tappable to copy on mobile)
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=address
-    )
-    
-    # Attempt to trigger clipboard copy with HTML and JavaScript
-    try:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=f"""
-<span class="tg-spoiler">{address}</span>
-<script>
-try {{
-    navigator.clipboard.writeText('{address}').then(() => {{
-        console.log('Address copied to clipboard');
-    }}).catch(err => {{
-        console.error('Clipboard copy failed: ', err);
-    }});
-}} catch (e) {{
-    console.error('Clipboard API not supported: ', e);
-}}
-</script>
-<b>Address copied to clipboard!</b> If it didn't copy, please manually copy the address above.
-            """,
-            parse_mode='HTML'
-        )
-    except TelegramError as e:
-        logger.error(f"Failed to send clipboard copy message for user {user_id}: {e}")
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=f"⚠️ Could not automatically copy the address. Please manually copy it: {address}"
-        )
-    
-    amount = context.user_data.get('deposit_amount', 0)
-    keyboard = [
-        [InlineKeyboardButton("📋 Copy Address", callback_data=f'copy_address_{crypto_name}')],
-        [InlineKeyboardButton("✅ I Have Made Payment", callback_data='payment_made')],
-        [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    message = f"""💳 **Deposit Details**
-
-💰 **Amount:** ${amount:.2f}
-🪙 **Cryptocurrency:** {crypto_name}
-🏦 **Wallet Address:** `{address}`
-⚠️ **Security Warning:** Never share your payment details publicly. Only send to the address above.
-
-Click "Copy Address" to attempt automatic copying again or manually copy the address above."""
-    
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=message,
-        reply_markup=reply_markup,
-        parse_mode='Markdown'
+        text=f"<code>{address}</code>\n\n👆 <b>Tap the address above to copy it</b>",
+        parse_mode='HTML'
     )
     
     return DEPOSIT_PROOF
@@ -813,7 +765,7 @@ async def handle_deposit_confirmation(update: Update, context: ContextTypes.DEFA
         
         if is_staking:
             logger.info(f"Approved STAKING deposit of ${amount:.2f} for user {target_user_id}. Balance: ${user_info['balance']:.2f}, Staked: ${user_info.get('staked_balance', 0):.2f}")
-            notify_text = f"✅ Your staking deposit of ${amount:.2f} has been confirmed!\n\n💰 Balance: ${user_info['balance']:.2f}\n🎯 Staked Balance: ${user_info.get('staked_balance', 0):.2f}"
+            notify_text = f"✅ Your staking deposit of ${amount:.2f} has been confirmed!\n\n💰 Balance: ${user_info['balance']:.2f}\n🎯 Staking Balance: ${user_info.get('staked_balance', 0):.2f}"
         else:
             logger.info(f"Approved deposit of ${amount:.2f} for user {target_user_id}. New balance: ${user_info['balance']:.2f}")
             notify_text = f"✅ Your deposit of ${amount:.2f} has been confirmed! Your new balance is ${user_info['balance']:.2f}."
@@ -1374,9 +1326,7 @@ All your staking funds are currently locked. Deposit more to start a new stake."
 
 💰 **Available Balance:** ${available:.2f}
 🎯 **Staking Balance:** ${staked_balance:.2f}
-🔒 **Locked Stake:** ${locked_balance:.2f}
-
-Manage your active stakes or start a new one."""
+🔒 **Locked Stake:** ${locked_balance:.2f}"""
         keyboard.append([InlineKeyboardButton("🚀 Start New Stake", callback_data='start_staking')])
     
     keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')])
