@@ -33,6 +33,7 @@ Welcome to the admin control center. Manage users, transactions, and system sett
         [InlineKeyboardButton("💸 Approve Withdrawal", callback_data='admin_approve_withdrawal')],
         [InlineKeyboardButton("❌ Reject Withdrawal", callback_data='admin_reject_withdrawal')],
         [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
+        [InlineKeyboardButton("💎 Update Stake Balance", callback_data='admin_update_stake')],
         [InlineKeyboardButton("🪙 Update Crypto Address", callback_data='admin_update_crypto')],
         [InlineKeyboardButton("📩 Send Login Details", callback_data='admin_send_login')],
         [InlineKeyboardButton("ℹ️ Help", callback_data='admin_help')]
@@ -275,6 +276,20 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             text="Please enter: /rejectwithdrawal <user_id> <amount>",
             reply_markup=create_cancel_keyboard()
         )
+        
+    elif action == 'admin_update_stake':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please enter: /updatestake <user_id> <amount>",
+            reply_markup=create_cancel_keyboard()
+        )
+        
+    elif action == 'admin_update_stake':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please enter: /updatestake <user_id> <amount>",
+            reply_markup=create_cancel_keyboard()
+        )
     
     elif action == 'admin_update_profit':
         await context.bot.send_message(
@@ -456,6 +471,55 @@ async def reject_withdrawal(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     
     except (ValueError, IndexError):
         await update.message.reply_text("❌ Invalid format. Usage: /rejectwithdrawal <user_id> <amount>")
+
+async def update_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to update user's staked balance"""
+    user_id = update.effective_user.id
+    admin_id = int(context.bot_data.get('admin_id', 0))
+    
+    if not admin_id or user_id != admin_id:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /updatestake <user_id> <amount>")
+            return
+        
+        target_user_id = int(args[0])
+        amount = float(args[1])
+        
+        from database import db
+        user_info = db.get_user(target_user_id)
+        
+        if not user_info:
+            await update.message.reply_text(f"❌ User {target_user_id} not found.")
+            return
+            
+        # Update staked balance
+        current_stake = user_info.get('staked_balance', 0.0)
+        user_info['staked_balance'] = current_stake + amount
+        
+        # Ensure non-negative
+        if user_info['staked_balance'] < 0:
+            user_info['staked_balance'] = 0.0
+            
+        db.save_user(target_user_id, user_info)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=target_user_id,
+                text=f"📈 **Staked Balance Updated**\n\nYour staked balance has been updated by ${amount:.2f}.\nNew Staked Balance: ${user_info['staked_balance']:.2f}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎯 Staking Dashboard", callback_data='stake')]])
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {target_user_id}: {e}")
+            
+        await update.message.reply_text(f"✅ Updated staked balance for user {target_user_id}.\nNew Balance: ${user_info['staked_balance']:.2f}")
+        
+    except ValueError:
+        await update.message.reply_text("❌ Invalid format. Usage: /updatestake <user_id> <amount>")
 
 async def update_profit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to update user profits"""
