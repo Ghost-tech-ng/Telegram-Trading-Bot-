@@ -1343,8 +1343,8 @@ All your staking funds are currently locked. Deposit more to start a new stake."
 
 # Staking Configuration
 STAKING_COINS = [
-    'BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'USDC', 
-    'ADA', 'AVAX', 'DOGE', 'DOT', 'TRX', 'LINK'
+    'ETH', 'SOL', 'ADA', 'DOT', 'AVAX',
+    'ATOM', 'MATIC', 'NEAR', 'APT', 'SUI'
 ]
 
 async def stake_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1461,7 +1461,7 @@ async def get_staking_amount(update: Update, context: ContextTypes.DEFAULT_TYPE)
             [InlineKeyboardButton("30 Days", callback_data='stake_duration_30')],
             [InlineKeyboardButton("60 Days", callback_data='stake_duration_60')],
             [InlineKeyboardButton("90 Days", callback_data='stake_duration_90')],
-            [InlineKeyboardButton("Flexible (No Lock)", callback_data='stake_duration_flex')],
+            [InlineKeyboardButton("180 Days", callback_data='stake_duration_180')],
             [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1484,29 +1484,22 @@ async def select_staking_duration(update: Update, context: ContextTypes.DEFAULT_
     
     duration_raw = query.data.split('_')[-1]
     
-    if duration_raw == 'flex':
-        context.user_data['staking_duration'] = 'Flexible'
-        # Flexible means flexible plan automatically
-        context.user_data['staking_plan'] = 'flexible'
-        # Go straight to confirmation
-        return await finalize_stake(update, context)
-    else:
-        context.user_data['staking_duration'] = f"{duration_raw} Days"
-        
-        keyboard = [
-            [InlineKeyboardButton("🔒 Fixed Staking", callback_data='stake_plan_fixed')],
-            [InlineKeyboardButton("🔓 Flexible Staking", callback_data='stake_plan_flexible')],
-            [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        coin = context.user_data.get('staking_coin', 'N/A')
-        amount = context.user_data.get('staking_amount', 0)
-        duration = context.user_data.get('staking_duration', 'N/A')
-        
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=f"""📋 **Select Staking Type**
+    context.user_data['staking_duration'] = f"{duration_raw} Days"
+    
+    keyboard = [
+        [InlineKeyboardButton("🔒 Fixed Staking", callback_data='stake_plan_fixed')],
+        [InlineKeyboardButton("🔓 Flexible Staking", callback_data='stake_plan_flexible')],
+        [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    coin = context.user_data.get('staking_coin', 'N/A')
+    amount = context.user_data.get('staking_amount', 0)
+    duration = context.user_data.get('staking_duration', 'N/A')
+    
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"""📋 **Select Staking Type**
 
 💎 Asset: {coin}
 💰 Amount: ${amount:.2f}
@@ -1519,10 +1512,10 @@ async def select_staking_duration(update: Update, context: ContextTypes.DEFAULT_
 **🔓 Flexible Staking**
 • Withdraw anytime
 • Standard rewards""",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-        return MAIN_MENU
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    return MAIN_MENU
 
 async def select_staking_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle plan type selection and finalize the stake"""
