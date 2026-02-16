@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 import logging
 from threading import Thread
 from flask import Flask
@@ -1558,6 +1559,7 @@ async def finalize_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         'amount': amount,
         'plan': plan,
         'duration': duration,
+        'start_date': datetime.now().strftime("%Y-%m-%d %H:%M"),
         'status': 'Active'
     }
     
@@ -1774,7 +1776,8 @@ def main() -> None:
         send_admin_panel, admin_panel, handle_admin_action,
         approve_deposit, approve_withdrawal, reject_withdrawal, update_profit,
         update_crypto_address, list_users, admin_help, send_login,
-        approve_pending_user, cancel_admin_action, update_stake, update_locked_stake
+        approve_pending_user, cancel_admin_action, update_stake, update_locked_stake,
+        release_stake
     )
     
     admin_id = get_admin_id()
@@ -1919,6 +1922,7 @@ def main() -> None:
     application.add_handler(CommandHandler("rejectwithdrawal", reject_withdrawal))
     application.add_handler(CommandHandler("updatestake", update_stake))
     application.add_handler(CommandHandler("updatelocked", update_locked_stake))
+    application.add_handler(CommandHandler("releasestake", release_stake))
     application.add_handler(CommandHandler("updateprofit", update_profit))
     application.add_handler(CommandHandler("updatecrypto", update_crypto_address))
     application.add_handler(CommandHandler("listusers", list_users))

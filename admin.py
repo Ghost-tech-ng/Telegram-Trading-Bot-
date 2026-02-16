@@ -298,6 +298,13 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             text="Please enter: /updateprofit <user_id> <amount>",
             reply_markup=create_cancel_keyboard()
         )
+        
+    elif action == 'admin_release_stake':
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please enter: /releasestake <user_id> <amount>",
+            reply_markup=create_cancel_keyboard()
+        )
     
     elif action == 'admin_update_crypto':
         await context.bot.send_message(
@@ -522,6 +529,57 @@ async def update_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except ValueError:
         await update.message.reply_text("❌ Invalid format. Usage: /updatestake <user_id> <amount>")
 
+async def release_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command to release locked stake to available balance"""
+    user_id = update.effective_user.id
+    admin_id = int(context.bot_data.get('admin_id', 0))
+    
+    if not admin_id or user_id != admin_id:
+        await update.message.reply_text("❌ Unauthorized access.")
+        return
+    
+    try:
+        args = context.args
+        if len(args) != 2:
+            await update.message.reply_text("Usage: /releasestake <user_id> <amount>")
+            return
+        
+        target_user_id = int(args[0])
+        amount = float(args[1])
+        
+        from database import db
+        user_info = db.get_user(target_user_id)
+        
+        if not user_info:
+            await update.message.reply_text(f"❌ User {target_user_id} not found.")
+            return
+            
+        locked = user_info.get('locked_stake_balance', 0.0)
+        
+        if amount > locked:
+             await update.message.reply_text(f"❌ Amount exceeds locked balance (${locked:.2f}).")
+             return
+
+        # Move funds: Locked -> Balance
+        user_info['locked_stake_balance'] = locked - amount
+        user_info['balance'] += amount
+            
+        db.save_user(target_user_id, user_info)
+        
+        try:
+            await context.bot.send_message(
+                chat_id=target_user_id,
+                text=f"🔓 **Stake Released**\n\nYour stake of ${amount:.2f} has been released and added to your available balance.\n\n💰 New Available Balance: ${user_info['balance']:.2f}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data='back_to_menu')]])
+            )
+        except TelegramError as e:
+            logger.error(f"Failed to notify user {target_user_id}: {e}")
+            
+        await update.message.reply_text(f"✅ Released ${amount:.2f} from locked stake for user {target_user_id}.\nLocked: ${user_info['locked_stake_balance']:.2f} | Balance: ${user_info['balance']:.2f}")
+        
+    except ValueError:
+        await update.message.reply_text("❌ Invalid format. Usage: /releasestake <user_id> <amount>")
+
 async def update_locked_stake(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command to update user's locked stake balance"""
     user_id = update.effective_user.id
@@ -736,8 +794,16 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"🤖 Active Bot: {bot}\n"
             f"💳 Pending Deposit: {pending_dep}\n"
             f"💸 Pending Withdrawal: {pending_with}\n"
-            "━━━━━━━━━━━━━━━━━━━\n"
         )
+        
+        stakes = data.get('active_stakes', [])
+        if stakes:
+            users_list += "📋 **Active Stakes:**\n"
+            for s in stakes:
+                start = s.get('start_date', 'N/A')
+                users_list += f"   • {s.get('coin')} | ${s.get('amount'):.2f} | {s.get('duration')} | {start}\n"
+        
+        users_list += "━━━━━━━━━━━━━━━━━━━\n"
     
     if len(users_list) > 4000:
         parts = [users_list[i:i+4000] for i in range(0, len(users_list), 4000)]
@@ -770,6 +836,7 @@ Welcome to the NCW Trading Bot Admin Panel. Below are the available commands:
 📈 /updateprofit <user_id> <amount> - Update user's profit
 💎 /updatestake <user_id> <amount> - Update user's staking balance
 🔒 /updatelocked <user_id> <amount> - Update user's locked stake balance
+🔓 /releasestake <user_id> <amount> - Release stake to available balance
 🪙 /updatecrypto <crypto> <address> - Update crypto address
 📩 /sendlogin <user_id> <username> <password> - Send login details to user
 ℹ️ /adminhelp - Show this help message"""
@@ -796,6 +863,7 @@ Welcome to the admin control center. Manage users, transactions, and system sett
         [InlineKeyboardButton("📈 Update Profit", callback_data='admin_update_profit')],
         [InlineKeyboardButton("💎 Update Stake Balance", callback_data='admin_update_stake')],
         [InlineKeyboardButton("🔒 Update Locked Stake", callback_data='admin_update_locked')],
+        [InlineKeyboardButton("🔓 Release Stake", callback_data='admin_release_stake')],
         [InlineKeyboardButton("🪙 Update Crypto Address", callback_data='admin_update_crypto')],
         [InlineKeyboardButton("📩 Send Login Details", callback_data='admin_send_login')],
         [InlineKeyboardButton("ℹ️ Help", callback_data='admin_help')]
